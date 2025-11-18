@@ -49,6 +49,9 @@
           sendPrompt(msg.text, msg.sessionId).catch(err => {
             console.error('[CS chatgpt] ✗ Send prompt failed:', err);
           });
+        } else if (msg.type === 'START_NEW_CHAT') {
+          console.log('[CS chatgpt] START_NEW_CHAT');
+          startNewChat();
         } else if (msg.type === 'PING') {
           port.postMessage({ type: 'PONG', platform: 'chatgpt' });
         }
@@ -161,6 +164,13 @@
     stopButton: [
       'button[aria-label="Stop generating"]',
       'button[data-testid="stop-button"]'
+    ],
+
+    // New chat button
+    newChatButton: [
+      'a[href="/"]',
+      'button:has-text("New chat")',
+      'nav a[href="/"]'
     ]
   };
 
@@ -326,8 +336,28 @@
   }
 
   // ============================================================================
-  // Sending Prompts
+  // Sending Prompts and Chat Management
   // ============================================================================
+
+  function startNewChat() {
+    console.log('[CS chatgpt] Starting new chat...');
+
+    // Reset message tracking
+    lastMessageCount = 0;
+    isProcessing = false;
+    currentSessionId = null;
+
+    // Try to find and click the "New Chat" button/link
+    const newChatBtn = findElement(SELECTORS.newChatButton);
+    if (newChatBtn) {
+      console.log('[CS chatgpt] Found new chat button, clicking...');
+      newChatBtn.click();
+    } else {
+      // Fallback: navigate to home page to start new chat
+      console.log('[CS chatgpt] New chat button not found, navigating to home...');
+      window.location.href = 'https://chatgpt.com/';
+    }
+  }
 
   function sendPrompt(text, sessionId) {
     return new Promise((resolve, reject) => {

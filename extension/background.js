@@ -50,6 +50,9 @@ let claudeReady = false;
 // Dashboard ports (can have multiple instances)
 const dashboardPorts = [];
 
+// Tab wakeup monitoring - to keep tabs active for response detection
+let wakeupInterval = null;
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -129,6 +132,72 @@ function buildMissingPlatformsMessage(chatgptReady, claudeReady) {
   if (missing.length === 0) return null;
 
   return `Please open ${missing.join(' and ')} in a tab and log in, then reload the tab.`;
+}
+
+// ============================================================================
+// Tab Wakeup Monitoring
+// ============================================================================
+// Periodically activate platform tabs to keep them awake for response detection
+// Chrome suspends inactive tabs which breaks MutationObserver and timers
+
+async function activatePlatformTab(platform) {
+  const urls = platform === 'chatgpt'
+    ? ['https://chat.openai.com/*', 'https://chatgpt.com/*']
+    : ['https://claude.ai/*'];
+
+  try {
+    const tabs = await chrome.tabs.query({ url: urls });
+    if (tabs.length > 0) {
+      const tab = tabs[0];
+      // Activate but don't focus window to be less intrusive
+      await chrome.tabs.update(tab.id, { active: true });
+      console.log(`[BG] 🔔 Woke up ${platform} tab ${tab.id}`);
+    }
+  } catch (e) {
+    console.warn(`[BG] Failed to wake up ${platform} tab:`, e);
+  }
+}
+
+function startTabWakeupMonitor(sessionId) {
+  // Clear any existing interval
+  if (wakeupInterval) {
+    clearInterval(wakeupInterval);
+  }
+
+  console.log(`[BG] 🔔 Starting tab wakeup monitor for session ${sessionId}`);
+
+  // Wake up tabs every 2 seconds while waiting for responses
+  wakeupInterval = setInterval(async () => {
+    const session = sessions.get(sessionId);
+
+    // Stop if session is gone or completed
+    if (!session || session.status === 'finished' || session.status === 'error') {
+      console.log('[BG] 🔔 Stopping tab wakeup monitor - session complete');
+      stopTabWakeupMonitor();
+      return;
+    }
+
+    // Wake up platforms that we're waiting for
+    if (session.waitingFor.has('chatgpt')) {
+      await activatePlatformTab('chatgpt');
+    }
+    if (session.waitingFor.has('claude')) {
+      await activatePlatformTab('claude');
+    }
+
+    // If we're in summarizing state, only wake up chatgpt
+    if (session.status === 'summarizing') {
+      await activatePlatformTab('chatgpt');
+    }
+  }, 2000); // Every 2 seconds
+}
+
+function stopTabWakeupMonitor() {
+  if (wakeupInterval) {
+    console.log('[BG] 🔔 Stopped tab wakeup monitor');
+    clearInterval(wakeupInterval);
+    wakeupInterval = null;
+  }
 }
 
 // ============================================================================
@@ -254,10 +323,28 @@ function createSession(question) {
 
 function resetSession() {
   console.log('[BG] Resetting session for new discussion');
+
+  // Stop any ongoing tab wakeup monitoring
+  stopTabWakeupMonitor();
+
+  // Clear all existing sessions
+  sessions.clear();
+
   // Don't clear readiness flags - tabs are still open!
   // Just increment session counter so next START_SESSION gets a new ID
   sessionCounter++;
   currentSessionId = null;
+
+  // Notify content scripts to start new chats
+  if (chatgptPort) {
+    console.log('[BG] Sending START_NEW_CHAT to ChatGPT');
+    chatgptPort.postMessage({ type: 'START_NEW_CHAT' });
+  }
+
+  if (claudePort) {
+    console.log('[BG] Sending START_NEW_CHAT to Claude');
+    claudePort.postMessage({ type: 'START_NEW_CHAT' });
+  }
 }
 
 function clearSessionTimeouts(session) {
@@ -337,6 +424,9 @@ async function startSession(sessionId) {
 
   // Return to dashboard after sending prompts
   await returnToDashboard();
+
+  // Start tab wakeup monitoring to keep tabs active for response detection
+  startTabWakeupMonitor(sessionId);
 
   setResponseTimeout(sessionId, 'chatgpt');
   setResponseTimeout(sessionId, 'claude');
@@ -581,6 +671,9 @@ async function continueDiscussion(session) {
   // Return to dashboard after sending prompts
   await returnToDashboard();
 
+  // Restart tab wakeup monitoring for the new round
+  startTabWakeupMonitor(sessionId);
+
   setResponseTimeout(sessionId, 'chatgpt');
   setResponseTimeout(sessionId, 'claude');
 }
@@ -611,6 +704,9 @@ async function moveToSummary(session) {
   // Return to dashboard after sending prompt
   await returnToDashboard();
 
+  // Restart tab wakeup monitoring for summary
+  startTabWakeupMonitor(sessionId);
+
   setResponseTimeout(sessionId, 'chatgpt');
 }
 
@@ -629,6 +725,9 @@ function handleFinalSummary(content, sessionId) {
   // Mark session as finished
   session.status = 'finished';
   updateSessionStatus(sessionId, 'finished', 'Discussion complete');
+
+  // Stop tab wakeup monitoring
+  stopTabWakeupMonitor();
 
   clearSessionTimeouts(session);
 }

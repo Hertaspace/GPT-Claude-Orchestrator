@@ -49,6 +49,9 @@
           sendPrompt(msg.text, msg.sessionId).catch(err => {
             console.error('[CS claude] ✗ Send prompt failed:', err);
           });
+        } else if (msg.type === 'START_NEW_CHAT') {
+          console.log('[CS claude] START_NEW_CHAT');
+          startNewChat();
         } else if (msg.type === 'PING') {
           port.postMessage({ type: 'PONG', platform: 'claude' });
         }
@@ -167,6 +170,13 @@
     stopButton: [
       'button[aria-label*="Stop"]',
       'button[aria-label="Stop generating"]'
+    ],
+
+    // New chat button
+    newChatButton: [
+      'a[href*="/new"]',
+      'button:has-text("Start new chat")',
+      'div[role="button"]:has-text("New")'
     ]
   };
 
@@ -370,8 +380,28 @@
   }
 
   // ============================================================================
-  // Sending Prompts
+  // Sending Prompts and Chat Management
   // ============================================================================
+
+  function startNewChat() {
+    console.log('[CS claude] Starting new chat...');
+
+    // Reset message tracking
+    lastMessageCount = 0;
+    isProcessing = false;
+    currentSessionId = null;
+
+    // Try to find and click the "New Chat" button/link
+    const newChatBtn = findElement(SELECTORS.newChatButton);
+    if (newChatBtn) {
+      console.log('[CS claude] Found new chat button, clicking...');
+      newChatBtn.click();
+    } else {
+      // Fallback: navigate to new chat page
+      console.log('[CS claude] New chat button not found, navigating to new chat...');
+      window.location.href = 'https://claude.ai/new';
+    }
+  }
 
   function sendPrompt(text, sessionId) {
     console.log('[CS claude] sendPrompt called with sessionId:', sessionId);
