@@ -17,7 +17,15 @@
     statusDot: document.getElementById('statusDot'),
     statusText: document.getElementById('statusText'),
     themeToggle: document.getElementById('themeToggle'),
-    themeIcon: document.getElementById('themeIcon')
+    themeIcon: document.getElementById('themeIcon'),
+    debugHeader: document.getElementById('debugHeader'),
+    debugToggle: document.getElementById('debugToggle'),
+    debugContent: document.getElementById('debugContent'),
+    dashboardStatus: document.getElementById('dashboardStatus'),
+    chatgptStatus: document.getElementById('chatgptStatus'),
+    claudeStatus: document.getElementById('claudeStatus'),
+    lastMessageStatus: document.getElementById('lastMessageStatus'),
+    portStatus: document.getElementById('portStatus')
   };
 
   // ============================================================================
@@ -32,6 +40,15 @@
   let platformStatus = {
     chatgpt: false,
     claude: false
+  };
+
+  // Debug info tracking
+  let debugInfo = {
+    chatgptLastUpdate: null,
+    claudeLastUpdate: null,
+    dashboardConnected: false,
+    lastMessageType: null,
+    lastMessageTime: null
   };
 
   // ============================================================================
@@ -81,6 +98,80 @@
       } else {
         updateStatus('error', 'Platforms not ready - ' + statusMsg);
       }
+    }
+
+    // Update debug panel
+    updateDebugDisplay();
+  }
+
+  function formatDebugTime(timestamp) {
+    if (!timestamp) return 'Never';
+    const now = Date.now();
+    const diff = now - timestamp;
+    if (diff < 1000) return 'Just now';
+    if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    return formatTimestamp(timestamp);
+  }
+
+  function updateDebugDisplay() {
+    // Dashboard status
+    const dashboardValue = elements.dashboardStatus.querySelector('.debug-value');
+    if (debugInfo.dashboardConnected && port) {
+      dashboardValue.textContent = '✓ Connected';
+      elements.dashboardStatus.className = 'debug-row connected';
+    } else {
+      dashboardValue.textContent = '✗ Disconnected';
+      elements.dashboardStatus.className = 'debug-row disconnected';
+    }
+
+    // ChatGPT status
+    const chatgptValue = elements.chatgptStatus.querySelector('.debug-value');
+    if (platformStatus.chatgpt) {
+      chatgptValue.textContent = `✓ Ready (${formatDebugTime(debugInfo.chatgptLastUpdate)})`;
+      elements.chatgptStatus.className = 'debug-row connected';
+    } else {
+      chatgptValue.textContent = debugInfo.chatgptLastUpdate
+        ? `✗ Disconnected (last seen ${formatDebugTime(debugInfo.chatgptLastUpdate)})`
+        : '⏳ Waiting for connection...';
+      elements.chatgptStatus.className = debugInfo.chatgptLastUpdate ? 'debug-row disconnected' : 'debug-row pending';
+    }
+
+    // Claude status
+    const claudeValue = elements.claudeStatus.querySelector('.debug-value');
+    if (platformStatus.claude) {
+      claudeValue.textContent = `✓ Ready (${formatDebugTime(debugInfo.claudeLastUpdate)})`;
+      elements.claudeStatus.className = 'debug-row connected';
+    } else {
+      claudeValue.textContent = debugInfo.claudeLastUpdate
+        ? `✗ Disconnected (last seen ${formatDebugTime(debugInfo.claudeLastUpdate)})`
+        : '⏳ Waiting for connection...';
+      elements.claudeStatus.className = debugInfo.claudeLastUpdate ? 'debug-row disconnected' : 'debug-row pending';
+    }
+
+    // Last message
+    const lastMsgValue = elements.lastMessageStatus.querySelector('.debug-value');
+    if (debugInfo.lastMessageType) {
+      lastMsgValue.textContent = `${debugInfo.lastMessageType} (${formatDebugTime(debugInfo.lastMessageTime)})`;
+    } else {
+      lastMsgValue.textContent = 'None received yet';
+    }
+
+    // Port status
+    const portValue = elements.portStatus.querySelector('.debug-value');
+    portValue.textContent = port ? '✓ Active' : '✗ Inactive';
+    elements.portStatus.className = port ? 'debug-row connected' : 'debug-row disconnected';
+  }
+
+  function toggleDebugPanel() {
+    const isExpanded = elements.debugContent.classList.contains('expanded');
+    if (isExpanded) {
+      elements.debugContent.classList.remove('expanded');
+      elements.debugToggle.textContent = 'Click to expand ▼';
+    } else {
+      elements.debugContent.classList.add('expanded');
+      elements.debugToggle.textContent = 'Click to collapse ▲';
+      updateDebugDisplay(); // Refresh display when opening
     }
   }
 
@@ -200,8 +291,16 @@
       port = chrome.runtime.connect({ name: 'dashboard' });
       console.log('[Dashboard] Connected to background');
 
+      debugInfo.dashboardConnected = true;
+      updateDebugDisplay();
+
       port.onMessage.addListener((msg) => {
         console.log('[Dashboard] Received message:', msg.type);
+
+        // Update debug info for every message
+        debugInfo.lastMessageType = msg.type;
+        debugInfo.lastMessageTime = Date.now();
+
         if (msg.type === 'LOG_MESSAGE') {
           appendMessage(msg.role, msg.content, msg.round, msg.timestamp);
 
@@ -214,14 +313,27 @@
         } else if (msg.type === 'PLATFORM_READY') {
           console.log(`[Dashboard] Platform readiness: ${msg.platform} = ${msg.ready}`);
           platformStatus[msg.platform] = msg.ready;
+
+          // Track when platform updates were received
+          if (msg.platform === 'chatgpt') {
+            debugInfo.chatgptLastUpdate = Date.now();
+          } else if (msg.platform === 'claude') {
+            debugInfo.claudeLastUpdate = Date.now();
+          }
+
           updatePlatformStatusDisplay();
         }
+
+        // Update debug display after processing any message
+        updateDebugDisplay();
       });
 
       port.onDisconnect.addListener(() => {
         console.log('[Dashboard] Port disconnected from background');
         updateStatus('error', 'Disconnected from background');
         port = null;
+        debugInfo.dashboardConnected = false;
+        updateDebugDisplay();
         setTimeout(initializePort, 1000);
       });
 
@@ -230,6 +342,8 @@
     } catch (error) {
       console.error('[Dashboard] Failed to connect to background:', error);
       updateStatus('error', 'Failed to connect');
+      debugInfo.dashboardConnected = false;
+      updateDebugDisplay();
       setTimeout(initializePort, 2000);
     }
   }
@@ -357,6 +471,7 @@
     elements.newBtn.addEventListener('click', handleNewClick);
     elements.clearBtn.addEventListener('click', handleClearClick);
     elements.themeToggle.addEventListener('click', toggleTheme);
+    elements.debugHeader.addEventListener('click', toggleDebugPanel);
     elements.question.addEventListener('keydown', handleKeyDown);
 
     // Initialize port connection
@@ -364,6 +479,13 @@
 
     // Focus question input
     elements.question.focus();
+
+    // Start periodic debug display updates (every 5 seconds)
+    setInterval(() => {
+      if (elements.debugContent.classList.contains('expanded')) {
+        updateDebugDisplay();
+      }
+    }, 5000);
 
     console.log('Dashboard initialized');
   }

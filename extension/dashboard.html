@@ -402,6 +402,92 @@
       font-weight: 600;
       transition: all 0.3s ease;
     }
+
+    .debug-panel {
+      border-top: 1px solid var(--border-color);
+      background: var(--secondary-bg);
+      transition: all 0.3s ease;
+    }
+
+    .debug-header {
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .debug-header:hover {
+      background: var(--card-bg);
+    }
+
+    .debug-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .debug-toggle {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .debug-content {
+      padding: 16px 20px;
+      font-size: 12px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .debug-content.expanded {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .debug-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 12px;
+      margin-bottom: 6px;
+      background: var(--card-bg);
+      border-radius: 6px;
+      border-left: 3px solid var(--border-color);
+    }
+
+    .debug-row.connected {
+      border-left-color: #10b981;
+    }
+
+    .debug-row.disconnected {
+      border-left-color: #ef4444;
+    }
+
+    .debug-row.pending {
+      border-left-color: #f59e0b;
+    }
+
+    .debug-label {
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .debug-value {
+      color: var(--text-primary);
+      font-weight: normal;
+    }
+
+    .debug-timestamp {
+      font-size: 11px;
+      color: var(--text-secondary);
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
@@ -434,6 +520,38 @@
       <div class="status-indicator">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">Ready to start</span>
+      </div>
+    </div>
+
+    <div class="debug-panel">
+      <div class="debug-header" id="debugHeader">
+        <div class="debug-title">
+          <span>🔧</span>
+          <span>Connection Debug Info</span>
+        </div>
+        <div class="debug-toggle" id="debugToggle">Click to expand ▼</div>
+      </div>
+      <div class="debug-content" id="debugContent">
+        <div class="debug-row connected" id="dashboardStatus">
+          <span class="debug-label">Dashboard → Background:</span>
+          <span class="debug-value">Connecting...</span>
+        </div>
+        <div class="debug-row pending" id="chatgptStatus">
+          <span class="debug-label">ChatGPT Status:</span>
+          <span class="debug-value">Waiting for connection...</span>
+        </div>
+        <div class="debug-row pending" id="claudeStatus">
+          <span class="debug-label">Claude Status:</span>
+          <span class="debug-value">Waiting for connection...</span>
+        </div>
+        <div class="debug-row" id="lastMessageStatus">
+          <span class="debug-label">Last Message:</span>
+          <span class="debug-value">None</span>
+        </div>
+        <div class="debug-row" id="portStatus">
+          <span class="debug-label">Port Active:</span>
+          <span class="debug-value">No</span>
+        </div>
       </div>
     </div>
 
