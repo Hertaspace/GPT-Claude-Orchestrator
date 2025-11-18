@@ -5,13 +5,14 @@
   'use strict';
 
   // ============================================================================
-  // Immediate Connection and READY Signal
+  // Immediate Connection and READY Signal - RUNS IMMEDIATELY AT SCRIPT LOAD
   // ============================================================================
 
-  console.log('[CS chatgpt] content script loaded on', location.href);
+  console.log('[CS chatgpt] script loaded at', location.href);
 
-  // Connect to background immediately
+  // Connect to background immediately - NO conditions, NO async, NO events
   const port = chrome.runtime.connect({ name: 'chatgpt' });
+  console.log('[CS chatgpt] connected to background');
 
   // Send READY message immediately
   port.postMessage({
@@ -19,7 +20,7 @@
     platform: 'chatgpt',
     url: location.href
   });
-  console.log('[CS chatgpt] ✓ Sent READY message to background');
+  console.log('[CS chatgpt] sent READY');
 
   // ============================================================================
   // State

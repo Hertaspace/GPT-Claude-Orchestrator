@@ -1,6 +1,8 @@
 // GPT-Claude Orchestrator - Background Service Worker
 // Manages orchestration state machine and coordinates between ChatGPT, Claude, and dashboard
 
+console.log('[BG] Service worker started');
+
 // ============================================================================
 // Global State Management - Persists across dashboard reloads
 // ============================================================================
@@ -501,16 +503,27 @@ function handleFinalSummary(content, sessionId) {
 // ============================================================================
 
 function setupPlatformPort(port, platform) {
-  console.log(`[BG] 🔌 Port connected: ${platform}`);
+  console.log(`[BG] Port connected: ${platform}`);
 
-  if (platform === 'chatgpt') chatgptPort = port;
-  if (platform === 'claude') claudePort = port;
+  if (platform === 'chatgpt') {
+    chatgptPort = port;
+    console.log('[BG] ChatGPT port attached');
+  }
+  if (platform === 'claude') {
+    claudePort = port;
+    console.log('[BG] Claude port attached');
+  }
 
   port.onMessage.addListener((msg) => {
+    console.log(`[BG] Message from ${platform}:`, msg.type);
+
     if (msg.type === 'READY') {
-      console.log(`[BG] ✓ READY from ${platform}, URL: ${msg.url}`);
+      console.log(`[BG] READY received from ${platform}, URL: ${msg.url}`);
+
       if (platform === 'chatgpt') chatgptReady = true;
       if (platform === 'claude') claudeReady = true;
+
+      console.log(`[BG] Platforms now:`, { chatgptReady, claudeReady });
 
       // Notify all dashboards about readiness
       logToAllDashboards({
@@ -524,14 +537,16 @@ function setupPlatformPort(port, platform) {
   });
 
   port.onDisconnect.addListener(() => {
-    console.log(`[BG] 🔌✗ Port disconnected: ${platform}`);
+    console.log(`[BG] Port disconnected: ${platform}`);
     if (platform === 'chatgpt') {
       chatgptReady = false;
       chatgptPort = null;
+      console.log('[BG] ChatGPT port cleared, chatgptReady = false');
     }
     if (platform === 'claude') {
       claudeReady = false;
       claudePort = null;
+      console.log('[BG] Claude port cleared, claudeReady = false');
     }
 
     // Notify all dashboards about disconnection
@@ -548,12 +563,14 @@ function setupPlatformPort(port, platform) {
 // ============================================================================
 
 chrome.runtime.onConnect.addListener((port) => {
+  console.log('[BG] onConnect from port:', port.name);
+
   if (port.name === 'chatgpt') {
     setupPlatformPort(port, 'chatgpt');
   } else if (port.name === 'claude') {
     setupPlatformPort(port, 'claude');
   } else if (port.name === 'dashboard') {
-    console.log('[BG] 🔌 Dashboard connected');
+    console.log('[BG] Dashboard connected');
     dashboardPorts.push(port);
 
     // Send current readiness state to new dashboard
