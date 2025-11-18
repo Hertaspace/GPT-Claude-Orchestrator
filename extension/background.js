@@ -518,9 +518,13 @@ function processRound(session) {
   console.log(`[BG] States: GPT=${session.lastGptState}, Claude=${session.lastClaudeState}`);
 
   if (bothReady || maxRoundsReached) {
-    // Move to summary
-    console.log('[BG] 📝 Moving to summary phase');
-    moveToSummary(session);
+    // Only move to summary if not already summarizing (prevents duplicate calls)
+    if (session.status !== 'summarizing') {
+      console.log('[BG] 📝 Moving to summary phase');
+      moveToSummary(session);
+    } else {
+      console.log('[BG] ⏭ Already in summarizing state, skipping duplicate call');
+    }
   } else {
     // Continue discussion
     console.log('[BG] 💬 Continuing discussion to next round');
