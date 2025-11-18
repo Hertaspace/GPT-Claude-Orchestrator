@@ -217,30 +217,35 @@
   function initializePort() {
     try {
       port = chrome.runtime.connect({ name: 'chatgpt' });
+      console.log('[ChatGPT] Connected to background');
 
       // Send ready message
-      port.postMessage({
+      const readyMsg = {
         type: 'READY',
-        platform: 'chatgpt'
-      });
+        platform: 'chatgpt',
+        url: location.href
+      };
+      port.postMessage(readyMsg);
+      console.log('[ChatGPT] ✓ Sent READY message', readyMsg);
 
       // Listen for commands from background
       port.onMessage.addListener((msg) => {
+        console.log('[ChatGPT] Received message from background:', msg.type);
         if (msg.type === 'SEND_PROMPT') {
           sendPrompt(msg.text, msg.sessionId).catch(err => {
-            console.error('Failed to send prompt:', err);
+            console.error('[ChatGPT] Failed to send prompt:', err);
           });
         }
       });
 
       port.onDisconnect.addListener(() => {
-        console.log('Port disconnected, attempting to reconnect...');
+        console.log('[ChatGPT] Port disconnected, attempting to reconnect...');
+        port = null;
         setTimeout(initializePort, 1000);
       });
 
-      console.log('ChatGPT content script connected to background');
     } catch (error) {
-      console.error('Failed to connect to background:', error);
+      console.error('[ChatGPT] Failed to connect to background:', error);
       setTimeout(initializePort, 2000);
     }
   }
@@ -250,13 +255,15 @@
   // ============================================================================
 
   function initialize() {
-    console.log('ChatGPT content script initializing...');
+    console.log('[ChatGPT] Content script initializing on:', location.href);
 
     // Wait for page to be fully loaded
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initialize);
       return;
     }
+
+    console.log('[ChatGPT] Page loaded, connecting to background...');
 
     // Initialize port connection
     initializePort();

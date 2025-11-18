@@ -133,8 +133,10 @@
   function initializePort() {
     try {
       port = chrome.runtime.connect({ name: 'dashboard' });
+      console.log('[Dashboard] Connected to background');
 
       port.onMessage.addListener((msg) => {
+        console.log('[Dashboard] Received message:', msg.type);
         if (msg.type === 'LOG_MESSAGE') {
           appendMessage(msg.role, msg.content, msg.round, msg.timestamp);
 
@@ -148,15 +150,16 @@
       });
 
       port.onDisconnect.addListener(() => {
-        console.log('Port disconnected from background');
+        console.log('[Dashboard] Port disconnected from background');
         updateStatus('error', 'Disconnected from background');
+        port = null;
         setTimeout(initializePort, 1000);
       });
 
       updateStatus('ready', 'Connected and ready');
-      console.log('Dashboard connected to background');
+      console.log('[Dashboard] Ready to start sessions');
     } catch (error) {
-      console.error('Failed to connect to background:', error);
+      console.error('[Dashboard] Failed to connect to background:', error);
       updateStatus('error', 'Failed to connect');
       setTimeout(initializePort, 2000);
     }
@@ -201,6 +204,8 @@
       return;
     }
 
+    console.log('[Dashboard] Starting new session with question:', question);
+
     // Disable button and update UI
     isSessionActive = true;
     elements.startBtn.disabled = true;
@@ -208,13 +213,12 @@
     updateStatus('active', 'Initiating discussion...');
 
     // Send start session message
-    port.postMessage({
+    const startMsg = {
       type: 'START_SESSION',
       question: question
-    });
-
-    // Log user question locally (will also be echoed from background)
-    // appendMessage('user', question, 0, Date.now());
+    };
+    port.postMessage(startMsg);
+    console.log('[Dashboard] Sent START_SESSION message');
   }
 
   function handleClearClick() {

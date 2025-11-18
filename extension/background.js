@@ -237,10 +237,22 @@ function startSession(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
 
+  console.log('[BG] startSession - Readiness check:', {
+    chatgpt: platformReady.chatgpt,
+    claude: platformReady.claude,
+    chatgptPort: !!ports.chatgpt,
+    claudePort: !!ports.claude
+  });
+
   // Check if both platforms are ready
   if (!platformReady.chatgpt || !platformReady.claude) {
-    updateSessionStatus(sessionId, 'error',
-      'Please open ChatGPT and Claude in tabs and log in, then try again.');
+    const missingPlatforms = [];
+    if (!platformReady.chatgpt) missingPlatforms.push('ChatGPT');
+    if (!platformReady.claude) missingPlatforms.push('Claude');
+
+    const errorMsg = `Please open ${missingPlatforms.join(' and ')} in tabs and log in, then try again.`;
+    console.error('[BG] ✗ Cannot start session:', errorMsg);
+    updateSessionStatus(sessionId, 'error', errorMsg);
     session.status = 'error';
     return;
   }
@@ -428,7 +440,7 @@ function handleFinalSummary(content, sessionId) {
 // ============================================================================
 
 chrome.runtime.onConnect.addListener((port) => {
-  console.log('Port connected:', port.name);
+  console.log('[BG] Port connected:', port.name);
 
   if (port.name === 'chatgpt') {
     ports.chatgpt = port;
@@ -436,7 +448,7 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener((msg) => {
       if (msg.type === 'READY') {
         platformReady.chatgpt = true;
-        console.log('ChatGPT is ready');
+        console.log('[BG] ✓ ChatGPT is READY', msg);
       } else if (msg.type === 'NEW_MESSAGE') {
         // Check if this is a final summary or regular discussion
         const session = msg.sessionId ? sessions.get(msg.sessionId) :
@@ -462,7 +474,7 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener((msg) => {
       if (msg.type === 'READY') {
         platformReady.claude = true;
-        console.log('Claude is ready');
+        console.log('[BG] ✓ Claude is READY', msg);
       } else if (msg.type === 'NEW_MESSAGE') {
         handleNewMessage('claude', msg.content, msg.sessionId);
       }
@@ -497,6 +509,29 @@ chrome.runtime.onConnect.addListener((port) => {
       console.log('Dashboard disconnected');
     });
   }
+});
+
+// ============================================================================
+// Extension Action Click - Open Dashboard in Tab
+// ============================================================================
+
+chrome.action.onClicked.addListener(() => {
+  const url = chrome.runtime.getURL('dashboard.html');
+  console.log('[BG] Extension icon clicked, opening dashboard...');
+
+  // Check if a dashboard tab is already open
+  chrome.tabs.query({ url }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      // Focus existing dashboard tab
+      chrome.tabs.update(tabs[0].id, { active: true });
+      chrome.windows.update(tabs[0].windowId, { focused: true });
+      console.log('[BG] Focused existing dashboard tab');
+    } else {
+      // Create new dashboard tab
+      chrome.tabs.create({ url });
+      console.log('[BG] Created new dashboard tab');
+    }
+  });
 });
 
 console.log('GPT-Claude Orchestrator background service worker loaded');

@@ -289,30 +289,35 @@
   function initializePort() {
     try {
       port = chrome.runtime.connect({ name: 'claude' });
+      console.log('[Claude] Connected to background');
 
       // Send ready message
-      port.postMessage({
+      const readyMsg = {
         type: 'READY',
-        platform: 'claude'
-      });
+        platform: 'claude',
+        url: location.href
+      };
+      port.postMessage(readyMsg);
+      console.log('[Claude] ✓ Sent READY message', readyMsg);
 
       // Listen for commands from background
       port.onMessage.addListener((msg) => {
+        console.log('[Claude] Received message from background:', msg.type);
         if (msg.type === 'SEND_PROMPT') {
           sendPrompt(msg.text, msg.sessionId).catch(err => {
-            console.error('Failed to send prompt:', err);
+            console.error('[Claude] Failed to send prompt:', err);
           });
         }
       });
 
       port.onDisconnect.addListener(() => {
-        console.log('Port disconnected, attempting to reconnect...');
+        console.log('[Claude] Port disconnected, attempting to reconnect...');
+        port = null;
         setTimeout(initializePort, 1000);
       });
 
-      console.log('Claude content script connected to background');
     } catch (error) {
-      console.error('Failed to connect to background:', error);
+      console.error('[Claude] Failed to connect to background:', error);
       setTimeout(initializePort, 2000);
     }
   }
@@ -322,13 +327,15 @@
   // ============================================================================
 
   function initialize() {
-    console.log('Claude content script initializing...');
+    console.log('[Claude] Content script initializing on:', location.href);
 
     // Wait for page to be fully loaded
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initialize);
       return;
     }
+
+    console.log('[Claude] Page loaded, connecting to background...');
 
     // Initialize port connection
     initializePort();
