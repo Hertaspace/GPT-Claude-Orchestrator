@@ -344,6 +344,13 @@ function handleNewMessage(platform, content, providedSessionId) {
   const sessionId = session.id;
   console.log(`[BG] Processing message for session ${sessionId}, round ${session.round}, status ${session.status}`);
 
+  // Special handling for final summary
+  if (session.status === 'summarizing' && platform === 'chatgpt') {
+    console.log('[BG] 📝 Detected final summary from ChatGPT');
+    handleFinalSummary(content, sessionId);
+    return;
+  }
+
   // Clear timeout for this platform
   clearResponseTimeout(session, platform);
 
@@ -457,7 +464,8 @@ function moveToSummary(session) {
   updateSessionStatus(sessionId, 'summarizing', 'Generating final summary...');
 
   // Send summary prompt only to ChatGPT
-  session.waitingFor.add('chatgpt_final');
+  // Note: We don't add to waitingFor here because handleNewMessage
+  // checks session.status === 'summarizing' to route to handleFinalSummary
 
   const summaryPrompt = getFinalSummaryPrompt(
     session.question,
@@ -591,32 +599,6 @@ chrome.runtime.onConnect.addListener((port) => {
     });
   }
 });
-
-// ============================================================================
-// Special handling for final summary (from ChatGPT when summarizing)
-// ============================================================================
-
-// Intercept ChatGPT messages when in summarizing state
-const originalSetupPlatformPort = setupPlatformPort;
-setupPlatformPort = function(port, platform) {
-  if (platform === 'chatgpt') {
-    const originalChatGPTHandler = port.onMessage.addListener;
-    port.onMessage.addListener = function(handler) {
-      const wrappedHandler = (msg) => {
-        if (msg.type === 'NEW_MESSAGE' && currentSessionId) {
-          const session = sessions.get(currentSessionId);
-          if (session && session.status === 'summarizing') {
-            handleFinalSummary(msg.content, session.id);
-            return;
-          }
-        }
-        handler(msg);
-      };
-      originalChatGPTHandler.call(port.onMessage, wrappedHandler);
-    };
-  }
-  originalSetupPlatformPort(port, platform);
-};
 
 // ============================================================================
 // Extension Action Click - Open Dashboard in Tab
