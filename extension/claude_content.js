@@ -10,17 +10,67 @@
 
   console.log('[CS claude] script loaded at', location.href);
 
-  // Connect to background immediately - NO conditions, NO async, NO events
-  const port = chrome.runtime.connect({ name: 'claude' });
-  console.log('[CS claude] connected to background');
+  // Port connection - using 'let' so we can reconnect if disconnected
+  let port = null;
 
-  // Send READY message immediately
-  port.postMessage({
-    type: 'READY',
-    platform: 'claude',
-    url: location.href
-  });
-  console.log('[CS claude] sent READY');
+  function connectToBackground() {
+    try {
+      console.log('[CS claude] Connecting to background...');
+      port = chrome.runtime.connect({ name: 'claude' });
+      console.log('[CS claude] ✓ Connected to background');
+
+      // Send READY message
+      port.postMessage({
+        type: 'READY',
+        platform: 'claude',
+        url: location.href
+      });
+      console.log('[CS claude] ✓ Sent READY message');
+
+      // Set up message listeners
+      port.onMessage.addListener((msg) => {
+        console.log('[CS claude] ← Received message from background:', msg);
+
+        if (msg.type === 'SEND_PROMPT') {
+          console.log('[CS claude] SEND_PROMPT command received');
+          console.log('[CS claude] SessionId:', msg.sessionId);
+          console.log('[CS claude] Text preview:', (msg.text || '').slice(0, 100));
+
+          sendPrompt(msg.text, msg.sessionId).catch(err => {
+            console.error('[CS claude] ✗ Failed to send prompt:', err);
+          });
+        } else {
+          console.log('[CS claude] Unknown message type:', msg.type);
+        }
+      });
+
+      // Handle disconnection
+      port.onDisconnect.addListener(() => {
+        console.error('[CS claude] ✗ Port disconnected from background');
+        port = null;
+
+        // Try to reconnect after 2 seconds
+        console.log('[CS claude] Will attempt to reconnect in 2 seconds...');
+        setTimeout(() => {
+          console.log('[CS claude] Attempting to reconnect...');
+          connectToBackground();
+        }, 2000);
+      });
+
+    } catch (error) {
+      console.error('[CS claude] ✗ Failed to connect to background:', error);
+      port = null;
+
+      // Retry connection after 3 seconds
+      setTimeout(() => {
+        console.log('[CS claude] Retrying connection...');
+        connectToBackground();
+      }, 3000);
+    }
+  }
+
+  // Connect immediately on script load
+  connectToBackground();
 
   // ============================================================================
   // State
@@ -337,31 +387,6 @@
 
     console.log('Claude observer started');
   }
-
-  // ============================================================================
-  // Port Message Handlers
-  // ============================================================================
-
-  // Listen for commands from background
-  port.onMessage.addListener((msg) => {
-    console.log('[CS claude] ← Received message from background:', msg);
-
-    if (msg.type === 'SEND_PROMPT') {
-      console.log('[CS claude] SEND_PROMPT command received');
-      console.log('[CS claude] SessionId:', msg.sessionId);
-      console.log('[CS claude] Text preview:', (msg.text || '').slice(0, 100));
-
-      sendPrompt(msg.text, msg.sessionId).catch(err => {
-        console.error('[CS claude] ✗ Failed to send prompt:', err);
-      });
-    } else {
-      console.log('[CS claude] Unknown message type:', msg.type);
-    }
-  });
-
-  port.onDisconnect.addListener(() => {
-    console.error('[CS claude] ✗ Port disconnected from background');
-  });
 
   // ============================================================================
   // Initialization
