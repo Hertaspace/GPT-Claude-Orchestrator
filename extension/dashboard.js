@@ -187,6 +187,9 @@
           }
         } else if (msg.type === 'SESSION_STATUS') {
           handleSessionStatus(msg);
+        } else if (msg.type === 'PLATFORM_READY') {
+          console.log(`[Dashboard] Platform readiness: ${msg.platform} = ${msg.ready}`);
+          // Update UI to show platform status if needed
         }
       });
 
