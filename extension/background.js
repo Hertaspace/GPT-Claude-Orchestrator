@@ -2,6 +2,36 @@
 // Manages orchestration state machine and coordinates between ChatGPT, Claude, and dashboard
 
 console.log('[BG] Service worker started');
+console.log('[BG] Timestamp:', new Date().toISOString());
+
+// ============================================================================
+// Diagnostic Mode - Enhanced Error Tracking
+// ============================================================================
+
+const diagnostics = {
+  errors: [],
+  connections: [],
+  disconnections: [],
+  sessionEvents: []
+};
+
+function logDiagnostic(category, event) {
+  const entry = {
+    timestamp: Date.now(),
+    time: new Date().toISOString(),
+    ...event
+  };
+
+  if (diagnostics[category]) {
+    diagnostics[category].push(entry);
+    // Keep only last 50 entries
+    if (diagnostics[category].length > 50) {
+      diagnostics[category].shift();
+    }
+  }
+
+  console.log(`[BG] 📊 Diagnostic [${category}]:`, entry);
+}
 
 // ============================================================================
 // Global State Management - Persists across dashboard reloads
@@ -348,6 +378,21 @@ function handleNewMessage(platform, content, providedSessionId) {
     console.error('[BG] ✗ NO ACTIVE SESSION FOUND!');
     console.error('[BG] Available sessions:', Array.from(sessions.keys()));
     console.error('[BG] CurrentSessionId:', currentSessionId);
+    console.error('[BG] ProvidedSessionId:', providedSessionId);
+    console.error('[BG] Platform:', platform);
+    console.error('[BG] Total sessions in map:', sessions.size);
+
+    // Log diagnostic event
+    logDiagnostic('errors', {
+      type: 'NO_ACTIVE_SESSION',
+      platform,
+      providedSessionId,
+      currentSessionId,
+      totalSessions: sessions.size,
+      allSessionIds: Array.from(sessions.keys()),
+      contentPreview: content?.slice(0, 100)
+    });
+
     return;
   }
 
@@ -520,6 +565,14 @@ function handleFinalSummary(content, sessionId) {
 
 function setupPlatformPort(port, platform) {
   console.log(`[BG] Port connected: ${platform}`);
+  console.log(`[BG] Timestamp:`, new Date().toISOString());
+
+  // Log connection diagnostic
+  logDiagnostic('connections', {
+    platform,
+    portName: port.name,
+    sender: port.sender?.url || 'unknown'
+  });
 
   if (platform === 'chatgpt') {
     chatgptPort = port;
@@ -541,6 +594,15 @@ function setupPlatformPort(port, platform) {
 
       console.log(`[BG] Platforms now:`, { chatgptReady, claudeReady });
 
+      // Log readiness diagnostic
+      logDiagnostic('connections', {
+        platform,
+        event: 'READY_RECEIVED',
+        url: msg.url,
+        chatgptReady,
+        claudeReady
+      });
+
       // Notify all dashboards about readiness
       logToAllDashboards({
         type: 'PLATFORM_READY',
@@ -553,7 +615,18 @@ function setupPlatformPort(port, platform) {
   });
 
   port.onDisconnect.addListener(() => {
-    console.log(`[BG] Port disconnected: ${platform}`);
+    console.log(`[BG] ✗ Port disconnected: ${platform}`);
+    console.log(`[BG] Timestamp:`, new Date().toISOString());
+    console.log(`[BG] Disconnect reason:`, chrome.runtime.lastError?.message || 'Normal disconnection');
+
+    // Log disconnection diagnostic
+    logDiagnostic('disconnections', {
+      platform,
+      reason: chrome.runtime.lastError?.message || 'Normal disconnection',
+      hadActiveSessions: sessions.size > 0,
+      activeSessionIds: Array.from(sessions.keys())
+    });
+
     if (platform === 'chatgpt') {
       chatgptReady = false;
       chatgptPort = null;
@@ -664,6 +737,57 @@ chrome.action.onClicked.addListener(() => {
 
 console.log('[BG] ✅ GPT-Claude Orchestrator background service worker loaded');
 console.log('[BG] Initial state: chatgptReady=' + chatgptReady + ', claudeReady=' + claudeReady);
+
+// ============================================================================
+// Debug Commands - Available in console
+// ============================================================================
+
+// Expose diagnostic functions to console
+globalThis.showDiagnostics = function() {
+  console.log('=== DIAGNOSTICS REPORT ===');
+  console.log('Generated at:', new Date().toISOString());
+  console.log('\n--- Current State ---');
+  console.log('ChatGPT Ready:', chatgptReady);
+  console.log('Claude Ready:', claudeReady);
+  console.log('ChatGPT Port:', chatgptPort ? 'Connected' : 'null');
+  console.log('Claude Port:', claudePort ? 'Connected' : 'null');
+  console.log('Dashboard Ports:', dashboardPorts.length);
+  console.log('Active Sessions:', sessions.size);
+  console.log('Current Session ID:', currentSessionId);
+
+  console.log('\n--- Recent Errors ---');
+  console.table(diagnostics.errors.slice(-10));
+
+  console.log('\n--- Recent Connections ---');
+  console.table(diagnostics.connections.slice(-10));
+
+  console.log('\n--- Recent Disconnections ---');
+  console.table(diagnostics.disconnections.slice(-10));
+
+  console.log('\n--- All Sessions ---');
+  sessions.forEach((session, id) => {
+    console.log(`${id}:`, {
+      status: session.status,
+      round: session.round,
+      waitingFor: Array.from(session.waitingFor)
+    });
+  });
+
+  console.log('\n=== END REPORT ===');
+  console.log('💡 Tip: Call showDiagnostics() again to refresh this report');
+};
+
+globalThis.clearDiagnostics = function() {
+  diagnostics.errors = [];
+  diagnostics.connections = [];
+  diagnostics.disconnections = [];
+  diagnostics.sessionEvents = [];
+  console.log('✓ Diagnostics cleared');
+};
+
+console.log('💡 Debug commands available:');
+console.log('   showDiagnostics() - Show diagnostic report');
+console.log('   clearDiagnostics() - Clear diagnostic history');
 
 // Periodic status logging (every 5 seconds for debugging)
 setInterval(() => {
