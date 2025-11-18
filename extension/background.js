@@ -720,6 +720,14 @@ chrome.action.onClicked.addListener(() => {
     claudePort: !!claudePort
   });
 
+  // Auto-inject content scripts into open tabs before opening dashboard
+  // This ensures tabs are ready even if they were opened before extension reload
+  injectContentScripts().then(() => {
+    console.log('[BG] Auto-injection triggered before opening dashboard');
+  }).catch(err => {
+    console.error('[BG] Auto-injection error:', err);
+  });
+
   // Check if a dashboard tab is already open
   chrome.tabs.query({ url }, (tabs) => {
     if (tabs && tabs.length > 0) {
@@ -802,3 +810,96 @@ setInterval(() => {
     });
   }
 }, 5000);
+
+// ============================================================================
+// Auto-Inject Content Scripts into Already Open Tabs
+// ============================================================================
+
+async function injectContentScripts() {
+  console.log('[BG] 🔧 Auto-injecting content scripts into open tabs...');
+
+  try {
+    // Find all ChatGPT tabs
+    const chatgptTabs = await chrome.tabs.query({
+      url: ['https://chat.openai.com/*', 'https://chatgpt.com/*']
+    });
+
+    console.log(`[BG] Found ${chatgptTabs.length} ChatGPT tab(s)`);
+
+    for (const tab of chatgptTabs) {
+      try {
+        // Check if tab is ready
+        if (tab.status !== 'complete') {
+          console.log(`[BG] Skipping ChatGPT tab ${tab.id} - not complete`);
+          continue;
+        }
+
+        console.log(`[BG] Injecting into ChatGPT tab ${tab.id}: ${tab.url}`);
+
+        // Inject HTML to Markdown converter first
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['html-to-markdown.js']
+        });
+
+        // Then inject ChatGPT content script
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['chatgpt_content.js']
+        });
+
+        console.log(`[BG] ✓ Successfully injected into ChatGPT tab ${tab.id}`);
+      } catch (error) {
+        // Ignore errors (script might already be injected)
+        console.log(`[BG] Could not inject into ChatGPT tab ${tab.id}:`, error.message);
+      }
+    }
+
+    // Find all Claude tabs
+    const claudeTabs = await chrome.tabs.query({
+      url: 'https://claude.ai/*'
+    });
+
+    console.log(`[BG] Found ${claudeTabs.length} Claude tab(s)`);
+
+    for (const tab of claudeTabs) {
+      try {
+        // Check if tab is ready
+        if (tab.status !== 'complete') {
+          console.log(`[BG] Skipping Claude tab ${tab.id} - not complete`);
+          continue;
+        }
+
+        console.log(`[BG] Injecting into Claude tab ${tab.id}: ${tab.url}`);
+
+        // Inject HTML to Markdown converter first
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['html-to-markdown.js']
+        });
+
+        // Then inject Claude content script
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['claude_content.js']
+        });
+
+        console.log(`[BG] ✓ Successfully injected into Claude tab ${tab.id}`);
+      } catch (error) {
+        // Ignore errors (script might already be injected)
+        console.log(`[BG] Could not inject into Claude tab ${tab.id}:`, error.message);
+      }
+    }
+
+    console.log('[BG] ✓ Auto-injection complete');
+
+  } catch (error) {
+    console.error('[BG] ✗ Error during auto-injection:', error);
+  }
+}
+
+// Run auto-injection when service worker starts
+// Wait a bit to ensure everything is initialized
+setTimeout(() => {
+  injectContentScripts();
+}, 1000);
