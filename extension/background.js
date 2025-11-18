@@ -609,6 +609,16 @@ function setupPlatformPort(port, platform) {
         platform,
         ready: true
       });
+    } else if (msg.type === 'MESSAGE_STREAMING') {
+      // Forward streaming updates to all dashboards
+      console.log(`[BG] 📡 Streaming update from ${platform}, length: ${msg.content?.length}`);
+      logToAllDashboards({
+        type: 'MESSAGE_STREAMING',
+        platform,
+        content: msg.content,
+        sessionId: msg.sessionId,
+        isComplete: msg.isComplete
+      });
     } else if (msg.type === 'NEW_MESSAGE') {
       handleNewMessage(platform, msg.content, msg.sessionId);
     }

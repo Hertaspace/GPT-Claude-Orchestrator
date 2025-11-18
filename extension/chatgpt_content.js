@@ -124,6 +124,9 @@
   let lastMessageCount = 0;
   let currentSessionId = null;
   let isProcessing = false;
+  let streamingInterval = null;
+  let lastStreamedContent = '';
+  let isCurrentlyStreaming = false;
 
   // ============================================================================
   // DOM Selectors and Utilities
@@ -221,34 +224,102 @@
     return text.trim();
   }
 
+  function startStreaming(messageElement) {
+    if (streamingInterval) return; // Already streaming
+
+    isCurrentlyStreaming = true;
+    lastStreamedContent = '';
+    console.log('[CS chatgpt] 🌊 Started streaming updates');
+
+    // Send streaming updates every 500ms
+    streamingInterval = setInterval(() => {
+      const currentContent = extractMessageText(messageElement);
+
+      // Only send if content changed
+      if (currentContent !== lastStreamedContent) {
+        lastStreamedContent = currentContent;
+
+        if (port && currentContent) {
+          port.postMessage({
+            type: 'MESSAGE_STREAMING',
+            platform: 'chatgpt',
+            content: currentContent,
+            sessionId: currentSessionId,
+            isComplete: false
+          });
+          console.log('[CS chatgpt] 📡 Streaming update, length:', currentContent.length);
+        }
+      }
+    }, 500);
+  }
+
+  function stopStreaming() {
+    if (streamingInterval) {
+      clearInterval(streamingInterval);
+      streamingInterval = null;
+      isCurrentlyStreaming = false;
+      lastStreamedContent = '';
+      console.log('[CS chatgpt] ⏹ Stopped streaming');
+    }
+  }
+
   function checkForNewMessages() {
-    if (isProcessing) return; // Don't check while we're processing
+    if (isProcessing) return;
 
     const assistantMessages = getAssistantMessages();
 
     if (assistantMessages.length > lastMessageCount) {
-      // Check if generation is complete (no stop button visible)
+      const lastMessage = assistantMessages[assistantMessages.length - 1];
       const stopButton = findElement(SELECTORS.stopButton);
+
       if (stopButton) {
-        // Still generating, wait
+        // Still generating - start or continue streaming
+        if (!isCurrentlyStreaming) {
+          console.log('[CS chatgpt] 🎬 Message generating, starting stream');
+          startStreaming(lastMessage);
+        }
         return;
       }
 
-      // Get the last message
-      const lastMessage = assistantMessages[assistantMessages.length - 1];
-      const text = extractMessageText(lastMessage);
+      // Generation complete
+      stopStreaming();
 
+      const text = extractMessageText(lastMessage);
       if (text && text.length > 0) {
         lastMessageCount = assistantMessages.length;
 
-        // Send to background
+        // Send final complete message
         if (port) {
           port.postMessage({
             type: 'NEW_MESSAGE',
             platform: 'chatgpt',
             content: text,
-            sessionId: currentSessionId
+            sessionId: currentSessionId,
+            isComplete: true
           });
+          console.log('[CS chatgpt] ✅ Complete message sent, length:', text.length);
+        }
+      }
+    } else if (isCurrentlyStreaming) {
+      // Check if streaming stopped (user stopped generation)
+      const stopButton = findElement(SELECTORS.stopButton);
+      if (!stopButton) {
+        console.log('[CS chatgpt] ⏸ Generation stopped by user');
+        stopStreaming();
+
+        // Send last streamed content as final
+        if (assistantMessages.length > 0) {
+          const lastMessage = assistantMessages[assistantMessages.length - 1];
+          const text = extractMessageText(lastMessage);
+          if (text && port) {
+            port.postMessage({
+              type: 'NEW_MESSAGE',
+              platform: 'chatgpt',
+              content: text,
+              sessionId: currentSessionId,
+              isComplete: true
+            });
+          }
         }
       }
     }

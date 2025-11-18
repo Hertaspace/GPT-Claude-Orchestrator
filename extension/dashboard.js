@@ -51,6 +51,9 @@
     lastMessageTime: null
   };
 
+  // Streaming message tracking - maps platform+round to message element
+  const streamingMessages = new Map();
+
   // ============================================================================
   // Utility Functions
   // ============================================================================
@@ -271,6 +274,81 @@
     elements.log.scrollTop = elements.log.scrollHeight;
   }
 
+  function handleStreamingMessage(platform, content, sessionId) {
+    if (!sessionId || sessionId !== currentSessionId) return;
+
+    clearEmptyState();
+
+    const key = platform; // Use platform as key for current streaming message
+    let messageDiv = streamingMessages.get(key);
+
+    if (!messageDiv) {
+      // Create new message element for streaming
+      messageDiv = document.createElement('div');
+      messageDiv.className = `message ${platform}`;
+
+      const headerDiv = document.createElement('div');
+      headerDiv.className = 'message-header';
+
+      const badge = document.createElement('span');
+      badge.className = 'message-badge';
+      badge.textContent = getRoleName(platform);
+
+      const streamingIndicator = document.createElement('span');
+      streamingIndicator.className = 'round-indicator';
+      streamingIndicator.textContent = '⏳ Streaming...';
+      streamingIndicator.style.background = '#3b82f6';
+      streamingIndicator.style.color = 'white';
+
+      const timestampSpan = document.createElement('span');
+      timestampSpan.className = 'timestamp';
+      timestampSpan.textContent = formatTimestamp(Date.now());
+
+      headerDiv.appendChild(badge);
+      headerDiv.appendChild(streamingIndicator);
+      headerDiv.appendChild(timestampSpan);
+
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'message-content';
+      contentDiv.textContent = content;
+
+      messageDiv.appendChild(headerDiv);
+      messageDiv.appendChild(contentDiv);
+
+      elements.log.appendChild(messageDiv);
+      streamingMessages.set(key, messageDiv);
+
+      console.log('[Dashboard] Created streaming message for', platform);
+    } else {
+      // Update existing streaming message
+      const contentDiv = messageDiv.querySelector('.message-content');
+      if (contentDiv) {
+        contentDiv.textContent = content;
+      }
+    }
+
+    // Auto-scroll to bottom
+    elements.log.scrollTop = elements.log.scrollHeight;
+  }
+
+  function finalizeStreamingMessage(platform) {
+    const key = platform;
+    const messageDiv = streamingMessages.get(key);
+
+    if (messageDiv) {
+      // Update the streaming indicator to show complete
+      const indicator = messageDiv.querySelector('.round-indicator');
+      if (indicator) {
+        indicator.textContent = 'Round ' + (messageDiv.dataset.round || '1');
+        indicator.style.background = '';
+        indicator.style.color = '';
+      }
+
+      streamingMessages.delete(key);
+      console.log('[Dashboard] Finalized streaming message for', platform);
+    }
+  }
+
   function clearLog() {
     elements.log.innerHTML = `
       <div class="empty-state">
@@ -301,7 +379,13 @@
         debugInfo.lastMessageType = msg.type;
         debugInfo.lastMessageTime = Date.now();
 
-        if (msg.type === 'LOG_MESSAGE') {
+        if (msg.type === 'MESSAGE_STREAMING') {
+          // Handle streaming message updates
+          handleStreamingMessage(msg.platform, msg.content, msg.sessionId);
+        } else if (msg.type === 'LOG_MESSAGE') {
+          // Finalize any streaming message from this platform
+          finalizeStreamingMessage(msg.role);
+
           appendMessage(msg.role, msg.content, msg.round, msg.timestamp);
 
           // Update current session ID

@@ -124,6 +124,9 @@
   let lastMessageCount = 0;
   let currentSessionId = null;
   let isProcessing = false;
+  let streamingInterval = null;
+  let lastStreamedContent = '';
+  let isCurrentlyStreaming = false;
 
   // ============================================================================
   // DOM Selectors and Utilities
@@ -264,6 +267,45 @@
     return text;
   }
 
+  function startStreaming(messageElement) {
+    if (streamingInterval) return; // Already streaming
+
+    isCurrentlyStreaming = true;
+    lastStreamedContent = '';
+    console.log('[CS claude] 🌊 Started streaming updates');
+
+    // Send streaming updates every 500ms
+    streamingInterval = setInterval(() => {
+      const currentContent = extractMessageText(messageElement);
+
+      // Only send if content changed
+      if (currentContent !== lastStreamedContent) {
+        lastStreamedContent = currentContent;
+
+        if (port && currentContent) {
+          port.postMessage({
+            type: 'MESSAGE_STREAMING',
+            platform: 'claude',
+            content: currentContent,
+            sessionId: currentSessionId,
+            isComplete: false
+          });
+          console.log('[CS claude] 📡 Streaming update, length:', currentContent.length);
+        }
+      }
+    }, 500);
+  }
+
+  function stopStreaming() {
+    if (streamingInterval) {
+      clearInterval(streamingInterval);
+      streamingInterval = null;
+      isCurrentlyStreaming = false;
+      lastStreamedContent = '';
+      console.log('[CS claude] ⏹ Stopped streaming');
+    }
+  }
+
   function checkForNewMessages() {
     if (isProcessing) {
       console.log('[CS claude] Skipping check - isProcessing = true');
@@ -278,26 +320,23 @@
     if (claudeMessages.length > lastMessageCount) {
       console.log('[CS claude] NEW MESSAGE DETECTED! Previous:', lastMessageCount, 'Current:', claudeMessages.length);
 
-      // Check if generation is complete (no stop button visible and not streaming)
-      const stopButton = findElement(SELECTORS.stopButton);
-      if (stopButton && stopButton.offsetParent !== null) {
-        console.log('[CS claude] Stop button still visible - still generating, will wait');
-        return;
-      }
-
-      // Get the last message
       const lastMessage = claudeMessages[claudeMessages.length - 1];
-
-      // Check for streaming attribute
+      const stopButton = findElement(SELECTORS.stopButton);
       const isStreaming = lastMessage.getAttribute('data-is-streaming');
-      console.log('[CS claude] Last message data-is-streaming:', isStreaming);
 
-      if (isStreaming === 'true') {
-        console.log('[CS claude] Still streaming - will wait');
+      // Check if still generating
+      if ((stopButton && stopButton.offsetParent !== null) || isStreaming === 'true') {
+        // Still generating - start or continue streaming
+        if (!isCurrentlyStreaming) {
+          console.log('[CS claude] 🎬 Message generating, starting stream');
+          startStreaming(lastMessage);
+        }
         return;
       }
 
-      // Extract the message text
+      // Generation complete
+      stopStreaming();
+
       const text = extractMessageText(lastMessage);
 
       if (text && text.length > 0) {
@@ -306,13 +345,14 @@
 
         lastMessageCount = claudeMessages.length;
 
-        // Send to background
+        // Send final complete message
         if (port) {
           const message = {
             type: 'NEW_MESSAGE',
             platform: 'claude',
             content: text,
-            sessionId: currentSessionId
+            sessionId: currentSessionId,
+            isComplete: true
           };
 
           console.log('[CS claude] Sending NEW_MESSAGE to background for session:', currentSessionId);
