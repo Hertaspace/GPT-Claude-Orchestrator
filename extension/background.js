@@ -291,7 +291,7 @@ function clearResponseTimeout(session, platform) {
 // Orchestration Logic
 // ============================================================================
 
-function startSession(sessionId) {
+async function startSession(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) {
     console.error(`[BG] ✗ startSession called but session ${sessionId} not found`);
@@ -326,14 +326,33 @@ function startSession(sessionId) {
   const gptPrompt = getInitialPrompt(session.question, 'chatgpt');
   const claudePrompt = getInitialPrompt(session.question, 'claude');
 
-  sendPromptToPlatform('chatgpt', sessionId, gptPrompt);
-  sendPromptToPlatform('claude', sessionId, claudePrompt);
+  // Send prompts sequentially and activate tabs
+  await sendPromptToPlatform('chatgpt', sessionId, gptPrompt);
+  await sendPromptToPlatform('claude', sessionId, claudePrompt);
+
+  // Return to dashboard after sending prompts
+  await returnToDashboard();
 
   setResponseTimeout(sessionId, 'chatgpt');
   setResponseTimeout(sessionId, 'claude');
 }
 
-function sendPromptToPlatform(platform, sessionId, text) {
+async function returnToDashboard() {
+  try {
+    const dashboardUrl = chrome.runtime.getURL('dashboard.html');
+    const tabs = await chrome.tabs.query({ url: dashboardUrl });
+
+    if (tabs.length > 0) {
+      console.log('[BG] 🏠 Returning to dashboard tab');
+      await chrome.tabs.update(tabs[0].id, { active: true });
+      await chrome.windows.update(tabs[0].windowId, { focused: true });
+    }
+  } catch (e) {
+    console.warn('[BG] Could not return to dashboard:', e);
+  }
+}
+
+async function sendPromptToPlatform(platform, sessionId, text) {
   const port = platform === 'chatgpt' ? chatgptPort : claudePort;
   if (!port) {
     console.error(`[BG] ✗ No port for ${platform}`);
@@ -341,6 +360,34 @@ function sendPromptToPlatform(platform, sessionId, text) {
   }
 
   try {
+    console.log(`[BG] → Preparing to send SEND_PROMPT to ${platform} for session ${sessionId}`);
+
+    // Find and activate the platform tab to ensure it's not suspended
+    const urls = platform === 'chatgpt'
+      ? ['https://chat.openai.com/*', 'https://chatgpt.com/*']
+      : ['https://claude.ai/*'];
+
+    const tabs = await chrome.tabs.query({ url: urls });
+
+    if (tabs.length > 0) {
+      const tab = tabs[0];
+      console.log(`[BG] 🎯 Activating ${platform} tab ${tab.id} to ensure it's not suspended`);
+
+      // Activate the tab
+      await chrome.tabs.update(tab.id, { active: true });
+
+      // Also bring window to front
+      await chrome.windows.update(tab.windowId, { focused: true });
+
+      // Wait a bit for tab to fully activate
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      console.log(`[BG] ✓ ${platform} tab activated, sending prompt`);
+    } else {
+      console.warn(`[BG] ⚠ No ${platform} tab found, sending anyway`);
+    }
+
+    // Send the prompt
     console.log(`[BG] → Sending SEND_PROMPT to ${platform} for session ${sessionId}`);
     port.postMessage({
       type: 'SEND_PROMPT',
@@ -481,7 +528,7 @@ function processRound(session) {
   }
 }
 
-function continueDiscussion(session) {
+async function continueDiscussion(session) {
   const sessionId = session.id;
   session.round += 1;
 
@@ -489,7 +536,7 @@ function continueDiscussion(session) {
 
   if (session.round > session.maxRounds) {
     console.log('[BG] Max rounds exceeded, moving to summary');
-    moveToSummary(session);
+    await moveToSummary(session);
     return;
   }
 
@@ -513,14 +560,18 @@ function continueDiscussion(session) {
     session.lastClaudeAnswer
   );
 
-  sendPromptToPlatform('chatgpt', sessionId, gptPrompt);
-  sendPromptToPlatform('claude', sessionId, claudePrompt);
+  // Send prompts sequentially and activate tabs
+  await sendPromptToPlatform('chatgpt', sessionId, gptPrompt);
+  await sendPromptToPlatform('claude', sessionId, claudePrompt);
+
+  // Return to dashboard after sending prompts
+  await returnToDashboard();
 
   setResponseTimeout(sessionId, 'chatgpt');
   setResponseTimeout(sessionId, 'claude');
 }
 
-function moveToSummary(session) {
+async function moveToSummary(session) {
   const sessionId = session.id;
   session.status = 'summarizing';
   console.log(`[BG] 📝 moveToSummary for session ${sessionId}`);
@@ -536,7 +587,11 @@ function moveToSummary(session) {
     session.lastClaudeAnswer
   );
 
-  sendPromptToPlatform('chatgpt', sessionId, summaryPrompt);
+  await sendPromptToPlatform('chatgpt', sessionId, summaryPrompt);
+
+  // Return to dashboard after sending prompt
+  await returnToDashboard();
+
   setResponseTimeout(sessionId, 'chatgpt');
 }
 
