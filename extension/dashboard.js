@@ -28,6 +28,12 @@
   let currentSessionId = null;
   let isSessionActive = false;
 
+  // Platform readiness tracking
+  let platformStatus = {
+    chatgpt: false,
+    claude: false
+  };
+
   // ============================================================================
   // Utility Functions
   // ============================================================================
@@ -57,6 +63,24 @@
       elements.statusDot.classList.add('active');
     } else if (status === 'error') {
       elements.statusDot.classList.add('error');
+    }
+  }
+
+  function updatePlatformStatusDisplay() {
+    const chatgptStatus = platformStatus.chatgpt ? '✅' : '❌';
+    const claudeStatus = platformStatus.claude ? '✅' : '❌';
+    const statusMsg = `ChatGPT: ${chatgptStatus} | Claude: ${claudeStatus}`;
+
+    console.log('[Dashboard] Platform status updated:', statusMsg);
+    console.log('[Dashboard] Full status:', platformStatus);
+
+    // Update status text to show platform readiness
+    if (!isSessionActive) {
+      if (platformStatus.chatgpt && platformStatus.claude) {
+        updateStatus('ready', 'Both platforms ready - ' + statusMsg);
+      } else {
+        updateStatus('error', 'Platforms not ready - ' + statusMsg);
+      }
     }
   }
 
@@ -189,7 +213,8 @@
           handleSessionStatus(msg);
         } else if (msg.type === 'PLATFORM_READY') {
           console.log(`[Dashboard] Platform readiness: ${msg.platform} = ${msg.ready}`);
-          // Update UI to show platform status if needed
+          platformStatus[msg.platform] = msg.ready;
+          updatePlatformStatusDisplay();
         }
       });
 
@@ -200,8 +225,8 @@
         setTimeout(initializePort, 1000);
       });
 
-      updateStatus('ready', 'Connected and ready');
-      console.log('[Dashboard] Ready to start sessions');
+      console.log('[Dashboard] Port connection established');
+      updatePlatformStatusDisplay(); // Will be updated when PLATFORM_READY messages arrive
     } catch (error) {
       console.error('[Dashboard] Failed to connect to background:', error);
       updateStatus('error', 'Failed to connect');

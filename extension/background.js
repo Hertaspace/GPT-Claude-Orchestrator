@@ -639,7 +639,13 @@ chrome.runtime.onConnect.addListener((port) => {
 
 chrome.action.onClicked.addListener(() => {
   const url = chrome.runtime.getURL('dashboard.html');
-  console.log('[BG] 🖱 Extension icon clicked, opening dashboard...');
+  console.log('[BG] ===== Extension icon clicked =====');
+  console.log('[BG] Current readiness state:', {
+    chatgptReady,
+    claudeReady,
+    chatgptPort: !!chatgptPort,
+    claudePort: !!claudePort
+  });
 
   // Check if a dashboard tab is already open
   chrome.tabs.query({ url }, (tabs) => {
@@ -658,3 +664,17 @@ chrome.action.onClicked.addListener(() => {
 
 console.log('[BG] ✅ GPT-Claude Orchestrator background service worker loaded');
 console.log('[BG] Initial state: chatgptReady=' + chatgptReady + ', claudeReady=' + claudeReady);
+
+// Periodic status logging (every 5 seconds for debugging)
+setInterval(() => {
+  if (chatgptPort || claudePort || dashboardPorts.length > 0) {
+    console.log('[BG] ⏰ Status check:', {
+      chatgptReady,
+      claudeReady,
+      chatgptPortActive: !!chatgptPort,
+      claudePortActive: !!claudePort,
+      dashboardCount: dashboardPorts.length,
+      activeSessions: sessions.size
+    });
+  }
+}, 5000);
