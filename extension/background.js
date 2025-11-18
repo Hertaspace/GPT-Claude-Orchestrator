@@ -2,20 +2,21 @@
 // Manages orchestration state machine and coordinates between ChatGPT, Claude, and dashboard
 
 // ============================================================================
-// State Management
+// Global State Management - Persists across dashboard reloads
 // ============================================================================
 
 const sessions = new Map();
-const ports = {
-  chatgpt: null,
-  claude: null,
-  dashboards: [] // Multiple dashboard instances possible
-};
+let currentSessionId = null;
+let sessionCounter = 0;
 
-const platformReady = {
-  chatgpt: false,
-  claude: false
-};
+// Platform ports and readiness - persist across dashboard reloads
+let chatgptPort = null;
+let claudePort = null;
+let chatgptReady = false;
+let claudeReady = false;
+
+// Dashboard ports (can have multiple instances)
+const dashboardPorts = [];
 
 // ============================================================================
 // Configuration
@@ -33,30 +34,33 @@ const CONFIG = {
 // ============================================================================
 
 function generateSessionId() {
-  return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  sessionCounter++;
+  return `session_${Date.now()}_${sessionCounter}`;
 }
 
 function parseState(answerText) {
+  if (!answerText) return 'UNKNOWN';
   if (answerText.includes(CONFIG.READY_MARKER)) return 'READY';
   if (answerText.includes(CONFIG.DISCUSS_MARKER)) return 'DISCUSS';
   return 'UNKNOWN';
 }
 
 function stripStateMarker(answerText) {
+  if (!answerText) return '';
   const lines = answerText.split(/\r?\n/);
   const filtered = lines.filter(
-    line => !line.trim().startsWith(CONFIG.DISCUSS_MARKER) &&
-            !line.trim().startsWith(CONFIG.READY_MARKER)
+    line => !line.trim().includes(CONFIG.DISCUSS_MARKER) &&
+            !line.trim().includes(CONFIG.READY_MARKER)
   );
   return filtered.join('\n').trim();
 }
 
 function logToAllDashboards(message) {
-  ports.dashboards.forEach(port => {
+  dashboardPorts.forEach(port => {
     try {
       port.postMessage(message);
     } catch (e) {
-      console.error('Failed to send message to dashboard:', e);
+      console.error('[BG] Failed to send message to dashboard:', e);
     }
   });
 }
@@ -70,6 +74,7 @@ function logMessage(sessionId, role, content, round = 0) {
     content,
     timestamp: Date.now()
   };
+  console.log(`[BG] Logging message: ${role} in round ${round} for session ${sessionId}`);
   logToAllDashboards(message);
 }
 
@@ -80,7 +85,18 @@ function updateSessionStatus(sessionId, status, detail = '') {
     status,
     detail
   };
+  console.log(`[BG] Session status: ${status} - ${detail}`);
   logToAllDashboards(message);
+}
+
+function buildMissingPlatformsMessage(chatgptReady, claudeReady) {
+  const missing = [];
+  if (!chatgptReady) missing.push('ChatGPT');
+  if (!claudeReady) missing.push('Claude');
+
+  if (missing.length === 0) return null;
+
+  return `Please open ${missing.join(' and ')} in a tab and log in, then reload the tab.`;
 }
 
 // ============================================================================
@@ -199,7 +215,17 @@ function createSession(question) {
   };
 
   sessions.set(sessionId, session);
+  currentSessionId = sessionId;
+  console.log(`[BG] Created new session: ${sessionId}`);
   return session;
+}
+
+function resetSession() {
+  console.log('[BG] Resetting session for new discussion');
+  // Don't clear readiness flags - tabs are still open!
+  // Just increment session counter so next START_SESSION gets a new ID
+  sessionCounter++;
+  currentSessionId = null;
 }
 
 function clearSessionTimeouts(session) {
@@ -212,7 +238,7 @@ function setResponseTimeout(sessionId, platform) {
   if (!session) return;
 
   const timeoutId = setTimeout(() => {
-    console.error(`Response timeout for ${platform} in session ${sessionId}`);
+    console.error(`[BG] ⏱ Response timeout for ${platform} in session ${sessionId}`);
     updateSessionStatus(sessionId, 'error',
       `${platform} did not respond within ${CONFIG.RESPONSE_TIMEOUT / 1000} seconds`);
     session.status = 'error';
@@ -233,37 +259,32 @@ function clearResponseTimeout(session, platform) {
 // Orchestration Logic
 // ============================================================================
 
-function buildMissingPlatformsMessage(chatgptReady, claudeReady) {
-  const missing = [];
-  if (!chatgptReady) missing.push('ChatGPT');
-  if (!claudeReady) missing.push('Claude');
-
-  if (missing.length === 0) return null;
-
-  return `Please open ${missing.join(' and ')} in a tab and log in, then reload the tab.`;
-}
-
 function startSession(sessionId) {
   const session = sessions.get(sessionId);
-  if (!session) return;
+  if (!session) {
+    console.error(`[BG] ✗ startSession called but session ${sessionId} not found`);
+    return;
+  }
 
-  console.log('[BG] START_SESSION called - Readiness check:', {
-    chatgptReady: platformReady.chatgpt,
-    claudeReady: platformReady.claude,
-    chatgptPort: !!ports.chatgpt,
-    claudePort: !!ports.claude
+  console.log(`[BG] ▶ START_SESSION called for: ${sessionId}`);
+  console.log('[BG] Readiness check:', {
+    chatgptReady,
+    claudeReady,
+    chatgptPort: !!chatgptPort,
+    claudePort: !!claudePort
   });
 
   // Check if both platforms are ready
-  if (!platformReady.chatgpt || !platformReady.claude) {
-    const errorMsg = buildMissingPlatformsMessage(platformReady.chatgpt, platformReady.claude);
+  if (!chatgptReady || !claudeReady) {
+    const errorMsg = buildMissingPlatformsMessage(chatgptReady, claudeReady);
     console.error('[BG] ✗ Cannot start session - platforms not ready:', errorMsg);
-    console.error('[BG] Current platformReady state:', platformReady);
+    console.error('[BG] Current readiness state:', { chatgptReady, claudeReady });
     updateSessionStatus(sessionId, 'error', errorMsg);
     session.status = 'error';
     return;
   }
 
+  console.log(`[BG] ✓ Both platforms ready, starting session ${sessionId}`);
   updateSessionStatus(sessionId, 'starting', 'Sending initial prompts...');
 
   // Send initial prompts to both platforms
@@ -281,28 +302,33 @@ function startSession(sessionId) {
 }
 
 function sendPromptToPlatform(platform, sessionId, text) {
-  const port = ports[platform];
+  const port = platform === 'chatgpt' ? chatgptPort : claudePort;
   if (!port) {
-    console.error(`No port for ${platform}`);
+    console.error(`[BG] ✗ No port for ${platform}`);
     return;
   }
 
   try {
+    console.log(`[BG] → Sending SEND_PROMPT to ${platform} for session ${sessionId}`);
     port.postMessage({
       type: 'SEND_PROMPT',
       sessionId,
       text
     });
   } catch (e) {
-    console.error(`Failed to send prompt to ${platform}:`, e);
+    console.error(`[BG] ✗ Failed to send prompt to ${platform}:`, e);
   }
 }
 
 function handleNewMessage(platform, content, providedSessionId) {
-  // Find the active session (use provided sessionId or find the most recent)
+  console.log(`[BG] ← NEW_MESSAGE from ${platform}, sessionId: ${providedSessionId}`);
+
+  // Find the active session (use provided sessionId or current session)
   let session;
   if (providedSessionId && sessions.has(providedSessionId)) {
     session = sessions.get(providedSessionId);
+  } else if (currentSessionId && sessions.has(currentSessionId)) {
+    session = sessions.get(currentSessionId);
   } else {
     // Get the most recent non-finished session
     const activeSessions = Array.from(sessions.values())
@@ -311,11 +337,12 @@ function handleNewMessage(platform, content, providedSessionId) {
   }
 
   if (!session) {
-    console.warn('Received message but no active session found');
+    console.warn('[BG] ⚠ Received message but no active session found');
     return;
   }
 
   const sessionId = session.id;
+  console.log(`[BG] Processing message for session ${sessionId}, round ${session.round}, status ${session.status}`);
 
   // Clear timeout for this platform
   clearResponseTimeout(session, platform);
@@ -327,6 +354,8 @@ function handleNewMessage(platform, content, providedSessionId) {
   const state = parseState(content);
   const strippedContent = stripStateMarker(content);
 
+  console.log(`[BG] Message state from ${platform}: ${state}`);
+
   if (platform === 'chatgpt') {
     session.lastGptAnswer = strippedContent;
     session.lastGptState = state;
@@ -335,21 +364,27 @@ function handleNewMessage(platform, content, providedSessionId) {
     session.lastClaudeState = state;
   }
 
-  // Log the message
+  // Log the message to dashboard
   const role = platform === 'chatgpt' ? 'chatgpt' : 'claude';
   logMessage(sessionId, role, content, session.round);
 
+  console.log(`[BG] Waiting for: [${Array.from(session.waitingFor).join(', ')}]`);
+
   // Check if we're waiting for more responses in this round
   if (session.waitingFor.size > 0) {
+    console.log(`[BG] ⏳ Still waiting for ${session.waitingFor.size} more platform(s)`);
     return; // Wait for other platform
   }
 
+  console.log('[BG] ✓ Both platforms responded, processing round...');
   // Both platforms have responded, decide next action
   processRound(session);
 }
 
 function processRound(session) {
   const sessionId = session.id;
+
+  console.log(`[BG] 🔄 processRound for session ${sessionId}, status: ${session.status}, round: ${session.round}`);
 
   if (session.status === 'starting') {
     // First round complete, move to discussing
@@ -362,11 +397,16 @@ function processRound(session) {
   const bothReady = session.lastGptState === 'READY' && session.lastClaudeState === 'READY';
   const maxRoundsReached = session.round >= session.maxRounds;
 
+  console.log(`[BG] Decision point: bothReady=${bothReady}, maxRoundsReached=${maxRoundsReached}`);
+  console.log(`[BG] States: GPT=${session.lastGptState}, Claude=${session.lastClaudeState}`);
+
   if (bothReady || maxRoundsReached) {
     // Move to summary
+    console.log('[BG] 📝 Moving to summary phase');
     moveToSummary(session);
   } else {
     // Continue discussion
+    console.log('[BG] 💬 Continuing discussion to next round');
     continueDiscussion(session);
   }
 }
@@ -375,7 +415,10 @@ function continueDiscussion(session) {
   const sessionId = session.id;
   session.round += 1;
 
+  console.log(`[BG] 🔄 continueDiscussion - incrementing to round ${session.round}`);
+
   if (session.round > session.maxRounds) {
+    console.log('[BG] Max rounds exceeded, moving to summary');
     moveToSummary(session);
     return;
   }
@@ -410,6 +453,7 @@ function continueDiscussion(session) {
 function moveToSummary(session) {
   const sessionId = session.id;
   session.status = 'summarizing';
+  console.log(`[BG] 📝 moveToSummary for session ${sessionId}`);
   updateSessionStatus(sessionId, 'summarizing', 'Generating final summary...');
 
   // Send summary prompt only to ChatGPT
@@ -429,6 +473,8 @@ function handleFinalSummary(content, sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
 
+  console.log(`[BG] ✅ Final summary received for session ${sessionId}`);
+
   clearResponseTimeout(session, 'chatgpt');
   session.waitingFor.delete('chatgpt_final');
 
@@ -443,61 +489,80 @@ function handleFinalSummary(content, sessionId) {
 }
 
 // ============================================================================
-// Port Communication
+// Port Communication - Platform Content Scripts
+// ============================================================================
+
+function setupPlatformPort(port, platform) {
+  console.log(`[BG] 🔌 Port connected: ${platform}`);
+
+  if (platform === 'chatgpt') chatgptPort = port;
+  if (platform === 'claude') claudePort = port;
+
+  port.onMessage.addListener((msg) => {
+    if (msg.type === 'READY') {
+      console.log(`[BG] ✓ READY from ${platform}, URL: ${msg.url}`);
+      if (platform === 'chatgpt') chatgptReady = true;
+      if (platform === 'claude') claudeReady = true;
+
+      // Notify all dashboards about readiness
+      logToAllDashboards({
+        type: 'PLATFORM_READY',
+        platform,
+        ready: true
+      });
+    } else if (msg.type === 'NEW_MESSAGE') {
+      handleNewMessage(platform, msg.content, msg.sessionId);
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    console.log(`[BG] 🔌✗ Port disconnected: ${platform}`);
+    if (platform === 'chatgpt') {
+      chatgptReady = false;
+      chatgptPort = null;
+    }
+    if (platform === 'claude') {
+      claudeReady = false;
+      claudePort = null;
+    }
+
+    // Notify all dashboards about disconnection
+    logToAllDashboards({
+      type: 'PLATFORM_READY',
+      platform,
+      ready: false
+    });
+  });
+}
+
+// ============================================================================
+// Port Communication - Main Listener
 // ============================================================================
 
 chrome.runtime.onConnect.addListener((port) => {
-  console.log('[BG] Port connected:', port.name);
-
   if (port.name === 'chatgpt') {
-    ports.chatgpt = port;
-
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'READY') {
-        platformReady.chatgpt = true;
-        console.log('[BG] ✓ ChatGPT is READY', msg);
-      } else if (msg.type === 'NEW_MESSAGE') {
-        // Check if this is a final summary or regular discussion
-        const session = msg.sessionId ? sessions.get(msg.sessionId) :
-          Array.from(sessions.values()).filter(s => s.status !== 'finished' && s.status !== 'error').pop();
-
-        if (session && session.status === 'summarizing') {
-          handleFinalSummary(msg.content, session.id);
-        } else {
-          handleNewMessage('chatgpt', msg.content, msg.sessionId);
-        }
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      ports.chatgpt = null;
-      platformReady.chatgpt = false;
-      console.log('ChatGPT disconnected');
-    });
-
+    setupPlatformPort(port, 'chatgpt');
   } else if (port.name === 'claude') {
-    ports.claude = port;
-
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'READY') {
-        platformReady.claude = true;
-        console.log('[BG] ✓ Claude is READY', msg);
-      } else if (msg.type === 'NEW_MESSAGE') {
-        handleNewMessage('claude', msg.content, msg.sessionId);
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      ports.claude = null;
-      platformReady.claude = false;
-      console.log('Claude disconnected');
-    });
-
+    setupPlatformPort(port, 'claude');
   } else if (port.name === 'dashboard') {
-    ports.dashboards.push(port);
+    console.log('[BG] 🔌 Dashboard connected');
+    dashboardPorts.push(port);
+
+    // Send current readiness state to new dashboard
+    port.postMessage({
+      type: 'PLATFORM_READY',
+      platform: 'chatgpt',
+      ready: chatgptReady
+    });
+    port.postMessage({
+      type: 'PLATFORM_READY',
+      platform: 'claude',
+      ready: claudeReady
+    });
 
     port.onMessage.addListener((msg) => {
       if (msg.type === 'START_SESSION') {
+        console.log('[BG] 📨 Received START_SESSION from dashboard');
         const session = createSession(msg.question);
 
         // Log user question
@@ -505,18 +570,53 @@ chrome.runtime.onConnect.addListener((port) => {
 
         // Start orchestration
         startSession(session.id);
+      } else if (msg.type === 'RESET_SESSION') {
+        console.log('[BG] 🔄 Received RESET_SESSION from dashboard');
+        resetSession();
+
+        // Notify dashboard that reset is complete
+        port.postMessage({
+          type: 'SESSION_RESET',
+          success: true
+        });
       }
     });
 
     port.onDisconnect.addListener(() => {
-      const index = ports.dashboards.indexOf(port);
+      console.log('[BG] 🔌✗ Dashboard disconnected');
+      const index = dashboardPorts.indexOf(port);
       if (index > -1) {
-        ports.dashboards.splice(index, 1);
+        dashboardPorts.splice(index, 1);
       }
-      console.log('Dashboard disconnected');
     });
   }
 });
+
+// ============================================================================
+// Special handling for final summary (from ChatGPT when summarizing)
+// ============================================================================
+
+// Intercept ChatGPT messages when in summarizing state
+const originalSetupPlatformPort = setupPlatformPort;
+setupPlatformPort = function(port, platform) {
+  if (platform === 'chatgpt') {
+    const originalChatGPTHandler = port.onMessage.addListener;
+    port.onMessage.addListener = function(handler) {
+      const wrappedHandler = (msg) => {
+        if (msg.type === 'NEW_MESSAGE' && currentSessionId) {
+          const session = sessions.get(currentSessionId);
+          if (session && session.status === 'summarizing') {
+            handleFinalSummary(msg.content, session.id);
+            return;
+          }
+        }
+        handler(msg);
+      };
+      originalChatGPTHandler.call(port.onMessage, wrappedHandler);
+    };
+  }
+  originalSetupPlatformPort(port, platform);
+};
 
 // ============================================================================
 // Extension Action Click - Open Dashboard in Tab
@@ -524,7 +624,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
 chrome.action.onClicked.addListener(() => {
   const url = chrome.runtime.getURL('dashboard.html');
-  console.log('[BG] Extension icon clicked, opening dashboard...');
+  console.log('[BG] 🖱 Extension icon clicked, opening dashboard...');
 
   // Check if a dashboard tab is already open
   chrome.tabs.query({ url }, (tabs) => {
@@ -541,4 +641,5 @@ chrome.action.onClicked.addListener(() => {
   });
 });
 
-console.log('GPT-Claude Orchestrator background service worker loaded');
+console.log('[BG] ✅ GPT-Claude Orchestrator background service worker loaded');
+console.log('[BG] Initial state: chatgptReady=' + chatgptReady + ', claudeReady=' + claudeReady);
