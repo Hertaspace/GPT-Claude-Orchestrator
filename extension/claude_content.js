@@ -10,66 +10,111 @@
 
   console.log('[CS claude] script loaded at', location.href);
 
-  // Port connection - using 'let' so we can reconnect if disconnected
+  // Port connection with robust reconnection
   let port = null;
+  let reconnectAttempts = 0;
+  let reconnectTimer = null;
+  const MAX_RECONNECT_ATTEMPTS = 10;
+  const BASE_RECONNECT_DELAY = 1000; // 1 second
+
+  function getReconnectDelay() {
+    // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
+    return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000);
+  }
 
   function connectToBackground() {
-    try {
-      console.log('[CS claude] Connecting to background...');
-      port = chrome.runtime.connect({ name: 'claude' });
-      console.log('[CS claude] ✓ Connected to background');
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
 
-      // Send READY message
+    try {
+      console.log(`[CS claude] Connecting... (attempt ${reconnectAttempts + 1})`);
+      port = chrome.runtime.connect({ name: 'claude' });
+      console.log('[CS claude] ✓ Connected');
+
+      // Reset attempts on success
+      reconnectAttempts = 0;
+
       port.postMessage({
         type: 'READY',
         platform: 'claude',
         url: location.href
       });
-      console.log('[CS claude] ✓ Sent READY message');
+      console.log('[CS claude] ✓ Sent READY');
 
-      // Set up message listeners
       port.onMessage.addListener((msg) => {
-        console.log('[CS claude] ← Received message from background:', msg);
-
         if (msg.type === 'SEND_PROMPT') {
-          console.log('[CS claude] SEND_PROMPT command received');
-          console.log('[CS claude] SessionId:', msg.sessionId);
-          console.log('[CS claude] Text preview:', (msg.text || '').slice(0, 100));
-
+          console.log('[CS claude] SEND_PROMPT:', msg.sessionId);
           sendPrompt(msg.text, msg.sessionId).catch(err => {
-            console.error('[CS claude] ✗ Failed to send prompt:', err);
+            console.error('[CS claude] ✗ Send prompt failed:', err);
           });
-        } else {
-          console.log('[CS claude] Unknown message type:', msg.type);
+        } else if (msg.type === 'PING') {
+          port.postMessage({ type: 'PONG', platform: 'claude' });
         }
       });
 
-      // Handle disconnection
       port.onDisconnect.addListener(() => {
-        console.error('[CS claude] ✗ Port disconnected from background');
+        const error = chrome.runtime.lastError;
+        console.warn('[CS claude] ⚠ Disconnected:', error?.message || 'unknown');
         port = null;
 
-        // Try to reconnect after 2 seconds
-        console.log('[CS claude] Will attempt to reconnect in 2 seconds...');
-        setTimeout(() => {
-          console.log('[CS claude] Attempting to reconnect...');
-          connectToBackground();
-        }, 2000);
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const delay = getReconnectDelay();
+          console.log(`[CS claude] 🔄 Reconnecting in ${delay}ms (${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+          reconnectTimer = setTimeout(() => {
+            reconnectAttempts++;
+            connectToBackground();
+          }, delay);
+        } else {
+          console.error('[CS claude] ✗ Max retries reached. Please refresh page.');
+          showReconnectNotice();
+        }
       });
 
     } catch (error) {
-      console.error('[CS claude] ✗ Failed to connect to background:', error);
+      console.error('[CS claude] ✗ Connection failed:', error.message);
       port = null;
 
-      // Retry connection after 3 seconds
-      setTimeout(() => {
-        console.log('[CS claude] Retrying connection...');
-        connectToBackground();
-      }, 3000);
+      if (error.message?.includes('Extension context invalidated')) {
+        console.error('[CS claude] ✗ Extension reloaded. Please refresh page.');
+        showReconnectNotice('Extension reloaded');
+        return;
+      }
+
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        const delay = getReconnectDelay();
+        console.log(`[CS claude] 🔄 Retry in ${delay}ms`);
+        reconnectTimer = setTimeout(() => {
+          reconnectAttempts++;
+          connectToBackground();
+        }, delay);
+      } else {
+        showReconnectNotice();
+      }
     }
   }
 
-  // Connect immediately on script load
+  function showReconnectNotice(reason) {
+    if (document.getElementById('gco-reconnect-notice')) return;
+    const notice = document.createElement('div');
+    notice.id = 'gco-reconnect-notice';
+    notice.style.cssText = `
+      position: fixed; top: 20px; right: 20px; z-index: 999999;
+      background: #ef4444; color: white; padding: 16px 20px;
+      border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      font-family: system-ui, sans-serif; font-size: 14px; max-width: 300px;
+    `;
+    notice.innerHTML = `
+      <div style="font-weight: 600; margin-bottom: 8px;">🔌 GPT-Claude Orchestrator</div>
+      <div style="margin-bottom: 12px;">${reason ? reason + '. ' : ''}Connection lost. Please refresh.</div>
+      <button onclick="location.reload()" style="background: white; color: #ef4444; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600;">
+        Refresh Page
+      </button>
+    `;
+    document.body.appendChild(notice);
+  }
+
   connectToBackground();
 
   // ============================================================================
