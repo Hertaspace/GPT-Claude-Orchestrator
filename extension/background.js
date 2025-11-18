@@ -330,6 +330,11 @@ async function startSession(sessionId) {
   await sendPromptToPlatform('chatgpt', sessionId, gptPrompt);
   await sendPromptToPlatform('claude', sessionId, claudePrompt);
 
+  // Wait for platforms to start processing before returning to dashboard
+  // This ensures content scripts can detect the responses even when tabs become inactive
+  console.log('[BG] ⏳ Waiting for platforms to start processing...');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   // Return to dashboard after sending prompts
   await returnToDashboard();
 
@@ -568,6 +573,11 @@ async function continueDiscussion(session) {
   await sendPromptToPlatform('chatgpt', sessionId, gptPrompt);
   await sendPromptToPlatform('claude', sessionId, claudePrompt);
 
+  // Wait for platforms to start processing before returning to dashboard
+  // This ensures content scripts can detect the responses even when tabs become inactive
+  console.log('[BG] ⏳ Waiting for platforms to start processing...');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   // Return to dashboard after sending prompts
   await returnToDashboard();
 
@@ -592,6 +602,11 @@ async function moveToSummary(session) {
   );
 
   await sendPromptToPlatform('chatgpt', sessionId, summaryPrompt);
+
+  // Wait for platform to start processing before returning to dashboard
+  // This ensures content script can detect the response even when tab becomes inactive
+  console.log('[BG] ⏳ Waiting for platform to start processing...');
+  await new Promise(resolve => setTimeout(resolve, 3000));
 
   // Return to dashboard after sending prompt
   await returnToDashboard();
