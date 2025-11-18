@@ -323,28 +323,37 @@ function sendPromptToPlatform(platform, sessionId, text) {
 }
 
 function handleNewMessage(platform, content, providedSessionId) {
-  console.log(`[BG] ← NEW_MESSAGE from ${platform}, sessionId: ${providedSessionId}`);
+  console.log(`[BG] ========== NEW_MESSAGE from ${platform} ==========`);
+  console.log(`[BG] Provided sessionId: ${providedSessionId}`);
+  console.log(`[BG] Content length: ${content?.length || 0}`);
+  console.log(`[BG] Content preview: ${(content || '').slice(0, 100)}...`);
 
   // Find the active session (use provided sessionId or current session)
   let session;
   if (providedSessionId && sessions.has(providedSessionId)) {
+    console.log(`[BG] ✓ Found session by provided sessionId: ${providedSessionId}`);
     session = sessions.get(providedSessionId);
   } else if (currentSessionId && sessions.has(currentSessionId)) {
+    console.log(`[BG] ✓ Found session by currentSessionId: ${currentSessionId}`);
     session = sessions.get(currentSessionId);
   } else {
     // Get the most recent non-finished session
     const activeSessions = Array.from(sessions.values())
       .filter(s => s.status !== 'finished' && s.status !== 'error');
+    console.log(`[BG] Active sessions count: ${activeSessions.length}`);
     session = activeSessions[activeSessions.length - 1];
   }
 
   if (!session) {
-    console.warn('[BG] ⚠ Received message but no active session found');
+    console.error('[BG] ✗ NO ACTIVE SESSION FOUND!');
+    console.error('[BG] Available sessions:', Array.from(sessions.keys()));
+    console.error('[BG] CurrentSessionId:', currentSessionId);
     return;
   }
 
   const sessionId = session.id;
-  console.log(`[BG] Processing message for session ${sessionId}, round ${session.round}, status ${session.status}`);
+  console.log(`[BG] ✓ Processing message for session ${sessionId}`);
+  console.log(`[BG] Session details: round=${session.round}, status=${session.status}`);
 
   // Special handling for final summary
   if (session.status === 'summarizing' && platform === 'chatgpt') {
@@ -355,29 +364,36 @@ function handleNewMessage(platform, content, providedSessionId) {
 
   // Clear timeout for this platform
   clearResponseTimeout(session, platform);
+  console.log(`[BG] ✓ Cleared timeout for ${platform}`);
 
   // Remove from waiting list
+  const wasWaiting = session.waitingFor.has(platform);
   session.waitingFor.delete(platform);
+  console.log(`[BG] Removed ${platform} from waitingFor (was waiting: ${wasWaiting})`);
 
   // Parse state and update session
   const state = parseState(content);
   const strippedContent = stripStateMarker(content);
 
-  console.log(`[BG] Message state from ${platform}: ${state}`);
+  console.log(`[BG] Parsed state from ${platform}: ${state}`);
+  console.log(`[BG] Stripped content length: ${strippedContent.length}`);
 
   if (platform === 'chatgpt') {
     session.lastGptAnswer = strippedContent;
     session.lastGptState = state;
+    console.log(`[BG] ✓ Updated lastGptAnswer and lastGptState`);
   } else {
     session.lastClaudeAnswer = strippedContent;
     session.lastClaudeState = state;
+    console.log(`[BG] ✓ Updated lastClaudeAnswer and lastClaudeState`);
   }
 
   // Log the message to dashboard
   const role = platform === 'chatgpt' ? 'chatgpt' : 'claude';
+  console.log(`[BG] Logging message to dashboard: role=${role}, round=${session.round}`);
   logMessage(sessionId, role, content, session.round);
 
-  console.log(`[BG] Waiting for: [${Array.from(session.waitingFor).join(', ')}]`);
+  console.log(`[BG] Still waiting for: [${Array.from(session.waitingFor).join(', ')}]`);
 
   // Check if we're waiting for more responses in this round
   if (session.waitingFor.size > 0) {
