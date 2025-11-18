@@ -11,10 +11,13 @@
   const elements = {
     question: document.getElementById('question'),
     startBtn: document.getElementById('startBtn'),
+    newBtn: document.getElementById('newBtn'),
     clearBtn: document.getElementById('clearBtn'),
     log: document.getElementById('log'),
     statusDot: document.getElementById('statusDot'),
-    statusText: document.getElementById('statusText')
+    statusText: document.getElementById('statusText'),
+    themeToggle: document.getElementById('themeToggle'),
+    themeIcon: document.getElementById('themeIcon')
   };
 
   // ============================================================================
@@ -71,6 +74,44 @@
     if (round === 0) return 'Initial';
     if (round === 'final') return 'Final';
     return `Round ${round}`;
+  }
+
+  // ============================================================================
+  // Theme Management
+  // ============================================================================
+
+  async function loadTheme() {
+    try {
+      const result = await chrome.storage.local.get(['theme']);
+      const theme = result.theme || 'light';
+      if (theme === 'dark') {
+        document.body.classList.add('dark');
+        updateThemeIcon();
+      }
+      console.log('[Dashboard] Loaded theme:', theme);
+    } catch (error) {
+      console.error('[Dashboard] Failed to load theme:', error);
+    }
+  }
+
+  function updateThemeIcon() {
+    const isDark = document.body.classList.contains('dark');
+    elements.themeIcon.textContent = isDark ? '☀️' : '🌙';
+  }
+
+  async function toggleTheme() {
+    document.body.classList.toggle('dark');
+    const isDark = document.body.classList.contains('dark');
+    const theme = isDark ? 'dark' : 'light';
+
+    try {
+      await chrome.storage.local.set({ theme });
+      console.log('[Dashboard] Theme saved:', theme);
+    } catch (error) {
+      console.error('[Dashboard] Failed to save theme:', error);
+    }
+
+    updateThemeIcon();
   }
 
   // ============================================================================
@@ -231,6 +272,32 @@
     updateStatus('ready', 'Log cleared - ready to start');
   }
 
+  function handleNewClick() {
+    if (isSessionActive) {
+      const confirm = window.confirm('A discussion is currently active. Are you sure you want to start a new discussion?');
+      if (!confirm) return;
+    }
+
+    console.log('[Dashboard] Starting new discussion - resetting session');
+
+    // Send reset message to background
+    if (port) {
+      port.postMessage({ type: 'RESET_SESSION' });
+    }
+
+    // Clear UI
+    elements.question.value = '';
+    clearLog();
+    isSessionActive = false;
+    currentSessionId = null;
+    elements.startBtn.disabled = false;
+    elements.startBtn.textContent = 'Start Discussion';
+    updateStatus('ready', 'Ready for new discussion');
+
+    // Focus question input
+    elements.question.focus();
+  }
+
   // ============================================================================
   // Keyboard Shortcuts
   // ============================================================================
@@ -254,9 +321,14 @@
   function initialize() {
     console.log('Dashboard initializing...');
 
+    // Load saved theme
+    loadTheme();
+
     // Set up event listeners
     elements.startBtn.addEventListener('click', handleStartClick);
+    elements.newBtn.addEventListener('click', handleNewClick);
     elements.clearBtn.addEventListener('click', handleClearClick);
+    elements.themeToggle.addEventListener('click', toggleTheme);
     elements.question.addEventListener('keydown', handleKeyDown);
 
     // Initialize port connection
