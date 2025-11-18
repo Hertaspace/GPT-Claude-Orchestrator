@@ -233,25 +233,32 @@ function clearResponseTimeout(session, platform) {
 // Orchestration Logic
 // ============================================================================
 
+function buildMissingPlatformsMessage(chatgptReady, claudeReady) {
+  const missing = [];
+  if (!chatgptReady) missing.push('ChatGPT');
+  if (!claudeReady) missing.push('Claude');
+
+  if (missing.length === 0) return null;
+
+  return `Please open ${missing.join(' and ')} in a tab and log in, then reload the tab.`;
+}
+
 function startSession(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
 
-  console.log('[BG] startSession - Readiness check:', {
-    chatgpt: platformReady.chatgpt,
-    claude: platformReady.claude,
+  console.log('[BG] START_SESSION called - Readiness check:', {
+    chatgptReady: platformReady.chatgpt,
+    claudeReady: platformReady.claude,
     chatgptPort: !!ports.chatgpt,
     claudePort: !!ports.claude
   });
 
   // Check if both platforms are ready
   if (!platformReady.chatgpt || !platformReady.claude) {
-    const missingPlatforms = [];
-    if (!platformReady.chatgpt) missingPlatforms.push('ChatGPT');
-    if (!platformReady.claude) missingPlatforms.push('Claude');
-
-    const errorMsg = `Please open ${missingPlatforms.join(' and ')} in tabs and log in, then try again.`;
-    console.error('[BG] ✗ Cannot start session:', errorMsg);
+    const errorMsg = buildMissingPlatformsMessage(platformReady.chatgpt, platformReady.claude);
+    console.error('[BG] ✗ Cannot start session - platforms not ready:', errorMsg);
+    console.error('[BG] Current platformReady state:', platformReady);
     updateSessionStatus(sessionId, 'error', errorMsg);
     session.status = 'error';
     return;

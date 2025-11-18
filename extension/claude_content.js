@@ -5,10 +5,26 @@
   'use strict';
 
   // ============================================================================
+  // Immediate Connection and READY Signal
+  // ============================================================================
+
+  console.log('[CS claude] content script loaded on', location.href);
+
+  // Connect to background immediately
+  const port = chrome.runtime.connect({ name: 'claude' });
+
+  // Send READY message immediately
+  port.postMessage({
+    type: 'READY',
+    platform: 'claude',
+    url: location.href
+  });
+  console.log('[CS claude] ✓ Sent READY message to background');
+
+  // ============================================================================
   // State
   // ============================================================================
 
-  let port = null;
   let lastMessageCount = 0;
   let currentSessionId = null;
   let isProcessing = false;
@@ -283,62 +299,35 @@
   }
 
   // ============================================================================
-  // Port Communication
+  // Port Message Handlers
   // ============================================================================
 
-  function initializePort() {
-    try {
-      port = chrome.runtime.connect({ name: 'claude' });
-      console.log('[Claude] Connected to background');
-
-      // Send ready message
-      const readyMsg = {
-        type: 'READY',
-        platform: 'claude',
-        url: location.href
-      };
-      port.postMessage(readyMsg);
-      console.log('[Claude] ✓ Sent READY message', readyMsg);
-
-      // Listen for commands from background
-      port.onMessage.addListener((msg) => {
-        console.log('[Claude] Received message from background:', msg.type);
-        if (msg.type === 'SEND_PROMPT') {
-          sendPrompt(msg.text, msg.sessionId).catch(err => {
-            console.error('[Claude] Failed to send prompt:', err);
-          });
-        }
+  // Listen for commands from background
+  port.onMessage.addListener((msg) => {
+    console.log('[CS claude] Received message from background:', msg.type);
+    if (msg.type === 'SEND_PROMPT') {
+      sendPrompt(msg.text, msg.sessionId).catch(err => {
+        console.error('[CS claude] Failed to send prompt:', err);
       });
-
-      port.onDisconnect.addListener(() => {
-        console.log('[Claude] Port disconnected, attempting to reconnect...');
-        port = null;
-        setTimeout(initializePort, 1000);
-      });
-
-    } catch (error) {
-      console.error('[Claude] Failed to connect to background:', error);
-      setTimeout(initializePort, 2000);
     }
-  }
+  });
+
+  port.onDisconnect.addListener(() => {
+    console.warn('[CS claude] Port disconnected from background');
+  });
 
   // ============================================================================
   // Initialization
   // ============================================================================
 
   function initialize() {
-    console.log('[Claude] Content script initializing on:', location.href);
+    console.log('[CS claude] Initializing DOM observers...');
 
     // Wait for page to be fully loaded
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initialize);
       return;
     }
-
-    console.log('[Claude] Page loaded, connecting to background...');
-
-    // Initialize port connection
-    initializePort();
 
     // Start observing for new messages
     startObserver();
@@ -347,7 +336,7 @@
     setTimeout(() => {
       const messages = getClaudeMessages();
       lastMessageCount = messages.length;
-      console.log(`Initial message count: ${lastMessageCount}`);
+      console.log('[CS claude] Initial message count:', lastMessageCount);
     }, 1000);
   }
 

@@ -5,10 +5,26 @@
   'use strict';
 
   // ============================================================================
+  // Immediate Connection and READY Signal
+  // ============================================================================
+
+  console.log('[CS chatgpt] content script loaded on', location.href);
+
+  // Connect to background immediately
+  const port = chrome.runtime.connect({ name: 'chatgpt' });
+
+  // Send READY message immediately
+  port.postMessage({
+    type: 'READY',
+    platform: 'chatgpt',
+    url: location.href
+  });
+  console.log('[CS chatgpt] ✓ Sent READY message to background');
+
+  // ============================================================================
   // State
   // ============================================================================
 
-  let port = null;
   let lastMessageCount = 0;
   let currentSessionId = null;
   let isProcessing = false;
@@ -211,62 +227,35 @@
   }
 
   // ============================================================================
-  // Port Communication
+  // Port Message Handlers
   // ============================================================================
 
-  function initializePort() {
-    try {
-      port = chrome.runtime.connect({ name: 'chatgpt' });
-      console.log('[ChatGPT] Connected to background');
-
-      // Send ready message
-      const readyMsg = {
-        type: 'READY',
-        platform: 'chatgpt',
-        url: location.href
-      };
-      port.postMessage(readyMsg);
-      console.log('[ChatGPT] ✓ Sent READY message', readyMsg);
-
-      // Listen for commands from background
-      port.onMessage.addListener((msg) => {
-        console.log('[ChatGPT] Received message from background:', msg.type);
-        if (msg.type === 'SEND_PROMPT') {
-          sendPrompt(msg.text, msg.sessionId).catch(err => {
-            console.error('[ChatGPT] Failed to send prompt:', err);
-          });
-        }
+  // Listen for commands from background
+  port.onMessage.addListener((msg) => {
+    console.log('[CS chatgpt] Received message from background:', msg.type);
+    if (msg.type === 'SEND_PROMPT') {
+      sendPrompt(msg.text, msg.sessionId).catch(err => {
+        console.error('[CS chatgpt] Failed to send prompt:', err);
       });
-
-      port.onDisconnect.addListener(() => {
-        console.log('[ChatGPT] Port disconnected, attempting to reconnect...');
-        port = null;
-        setTimeout(initializePort, 1000);
-      });
-
-    } catch (error) {
-      console.error('[ChatGPT] Failed to connect to background:', error);
-      setTimeout(initializePort, 2000);
     }
-  }
+  });
+
+  port.onDisconnect.addListener(() => {
+    console.warn('[CS chatgpt] Port disconnected from background');
+  });
 
   // ============================================================================
   // Initialization
   // ============================================================================
 
   function initialize() {
-    console.log('[ChatGPT] Content script initializing on:', location.href);
+    console.log('[CS chatgpt] Initializing DOM observers...');
 
     // Wait for page to be fully loaded
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initialize);
       return;
     }
-
-    console.log('[ChatGPT] Page loaded, connecting to background...');
-
-    // Initialize port connection
-    initializePort();
 
     // Start observing for new messages
     startObserver();
@@ -275,7 +264,7 @@
     setTimeout(() => {
       const messages = getAssistantMessages();
       lastMessageCount = messages.length;
-      console.log(`Initial message count: ${lastMessageCount}`);
+      console.log('[CS chatgpt] Initial message count:', lastMessageCount);
     }, 1000);
   }
 

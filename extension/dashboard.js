@@ -236,13 +236,15 @@
   // ============================================================================
 
   function handleKeyDown(event) {
-    // Ctrl/Cmd + Enter to start discussion
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    // Enter (without Shift) → start discussion
+    // Shift+Enter → insert newline (default behavior)
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (!isSessionActive) {
         handleStartClick();
       }
     }
+    // Shift+Enter: allow default behavior (newline)
   }
 
   // ============================================================================
