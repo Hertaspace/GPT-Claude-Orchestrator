@@ -149,12 +149,30 @@
   }
 
   function extractMessageText(messageElement) {
-    // Try to get the text content, excluding any UI elements
+    // Try to get the content area, excluding any UI elements
     const contentArea = messageElement.querySelector('[data-message-content="true"]') ||
                        messageElement.querySelector('.markdown') ||
+                       messageElement.querySelector('[class*="prose"]') ||
                        messageElement;
 
-    return contentArea.innerText.trim();
+    console.log('[CS chatgpt] Extracting from content area:', contentArea.className);
+
+    // Use HTML to Markdown converter if available for better formatting
+    let text = '';
+    if (typeof window.htmlToMarkdown === 'function') {
+      console.log('[CS chatgpt] Using HTML to Markdown converter');
+      try {
+        text = window.htmlToMarkdown(contentArea);
+      } catch (error) {
+        console.warn('[CS chatgpt] HTML to Markdown conversion failed, falling back to innerText:', error);
+        text = contentArea.innerText || contentArea.textContent || '';
+      }
+    } else {
+      console.log('[CS chatgpt] HTML to Markdown not available, using innerText');
+      text = contentArea.innerText || contentArea.textContent || '';
+    }
+
+    return text.trim();
   }
 
   function checkForNewMessages() {

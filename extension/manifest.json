@@ -19,12 +19,12 @@
   "content_scripts": [
     {
       "matches": ["https://chat.openai.com/*", "https://chatgpt.com/*"],
-      "js": ["chatgpt_content.js"],
+      "js": ["html-to-markdown.js", "chatgpt_content.js"],
       "run_at": "document_start"
     },
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["claude_content.js"],
+      "js": ["html-to-markdown.js", "claude_content.js"],
       "run_at": "document_start"
     }
   ],

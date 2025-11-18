@@ -187,12 +187,34 @@
   function extractMessageText(messageElement) {
     console.log('[CS claude] Extracting text from element:', messageElement.className);
 
-    // Try to get innerText from the message element
-    let text = messageElement.innerText || messageElement.textContent || '';
+    // Try to find the content container (where the actual message is)
+    // Claude usually has a specific structure for message content
+    let contentElement = messageElement.querySelector('[class*="content"]') ||
+                        messageElement.querySelector('[class*="prose"]') ||
+                        messageElement.querySelector('.font-claude-message') ||
+                        messageElement;
+
+    console.log('[CS claude] Content element found:', contentElement.className);
+
+    // Use HTML to Markdown converter if available for better formatting
+    let text = '';
+    if (typeof window.htmlToMarkdown === 'function') {
+      console.log('[CS claude] Using HTML to Markdown converter');
+      try {
+        text = window.htmlToMarkdown(contentElement);
+      } catch (error) {
+        console.warn('[CS claude] HTML to Markdown conversion failed, falling back to innerText:', error);
+        text = contentElement.innerText || contentElement.textContent || '';
+      }
+    } else {
+      console.log('[CS claude] HTML to Markdown not available, using innerText');
+      text = contentElement.innerText || contentElement.textContent || '';
+    }
+
     text = text.trim();
 
     console.log('[CS claude] Extracted text length:', text.length);
-    console.log('[CS claude] Extracted text preview:', text.slice(0, 100) + '...');
+    console.log('[CS claude] Extracted text preview:', text.slice(0, 200) + '...');
 
     return text;
   }
