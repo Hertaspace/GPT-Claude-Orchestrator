@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "GPT-Claude Orchestrator",
+  "version": "0.1.0",
+  "description": "Coordinate a multi-round discussion between ChatGPT and Claude via their web UIs.",
+  "permissions": [
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://chat.openai.com/*",
+    "https://claude.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.openai.com/*"],
+      "js": ["chatgpt_content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["claude_content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "dashboard.html",
+    "default_title": "GPT-Claude Orchestrator"
+  },
+  "icons": {
+    "16": "icon.svg",
+    "48": "icon.svg",
+    "128": "icon.svg"
+  }
+}
