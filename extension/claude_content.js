@@ -93,94 +93,122 @@
   // ============================================================================
 
   function getClaudeMessages() {
-    // Claude messages can be identified by class or structure
-    // Try to find all assistant messages
-    const allDivs = document.querySelectorAll('div');
-    const claudeMessages = [];
+    console.log('[CS claude] getClaudeMessages called');
 
-    allDivs.forEach(div => {
-      // Check for Claude-specific classes or attributes
-      const className = div.className || '';
-      if (className.includes('font-claude-message') ||
-          className.includes('claude') ||
-          div.getAttribute('data-is-streaming') !== null) {
-        claudeMessages.push(div);
-      }
-    });
+    // Try multiple strategies to find Claude's assistant messages
+    let claudeMessages = [];
 
-    // Fallback: look for conversation structure
-    if (claudeMessages.length === 0) {
-      // Find all message-like divs and filter out user messages
-      const possibleMessages = Array.from(document.querySelectorAll('[role="article"], .group, div[class*="message"]'));
-      return possibleMessages.filter(msg => {
-        const text = msg.textContent;
-        // Simple heuristic: user messages are usually shorter and don't have the response structure
-        return text.length > 100 && !msg.className.includes('user');
+    // Strategy 1: Look for data-is-streaming attribute (most reliable for current Claude UI)
+    const streamingElements = document.querySelectorAll('[data-is-streaming]');
+    console.log('[CS claude] Found elements with data-is-streaming:', streamingElements.length);
+
+    if (streamingElements.length > 0) {
+      claudeMessages = Array.from(streamingElements).filter(el => {
+        // Only non-streaming messages
+        return el.getAttribute('data-is-streaming') === 'false';
       });
+      console.log('[CS claude] Non-streaming messages:', claudeMessages.length);
+    }
+
+    // Strategy 2: Look for font-claude-message class
+    if (claudeMessages.length === 0) {
+      claudeMessages = Array.from(document.querySelectorAll('.font-claude-message'));
+      console.log('[CS claude] Messages with .font-claude-message:', claudeMessages.length);
+    }
+
+    // Strategy 3: Look for role="article" or similar
+    if (claudeMessages.length === 0) {
+      const articles = document.querySelectorAll('[role="article"]');
+      console.log('[CS claude] Found [role="article"] elements:', articles.length);
+
+      // Filter to only assistant messages (not user messages)
+      claudeMessages = Array.from(articles).filter(article => {
+        const text = article.textContent || '';
+        // Basic heuristic: Claude messages are usually longer
+        // and don't have specific user message markers
+        return text.length > 50 && !article.className.includes('user');
+      });
+      console.log('[CS claude] Filtered assistant articles:', claudeMessages.length);
     }
 
     return claudeMessages;
   }
 
   function extractMessageText(messageElement) {
-    // Try to get the text content, excluding any UI elements
-    // Look for the main content area
-    const contentSelectors = [
-      '.font-claude-message',
-      '[data-is-streaming="false"]',
-      'div[class*="prose"]',
-      'div[class*="content"]'
-    ];
+    console.log('[CS claude] Extracting text from element:', messageElement.className);
 
-    let contentArea = messageElement;
-    for (const selector of contentSelectors) {
-      const found = messageElement.querySelector(selector);
-      if (found) {
-        contentArea = found;
-        break;
-      }
-    }
+    // Try to get innerText from the message element
+    let text = messageElement.innerText || messageElement.textContent || '';
+    text = text.trim();
 
-    return contentArea.innerText.trim();
+    console.log('[CS claude] Extracted text length:', text.length);
+    console.log('[CS claude] Extracted text preview:', text.slice(0, 100) + '...');
+
+    return text;
   }
 
   function checkForNewMessages() {
-    if (isProcessing) return; // Don't check while we're processing
+    if (isProcessing) {
+      console.log('[CS claude] Skipping check - isProcessing = true');
+      return;
+    }
+
+    console.log('[CS claude] checkForNewMessages - lastMessageCount:', lastMessageCount);
 
     const claudeMessages = getClaudeMessages();
+    console.log('[CS claude] Current message count:', claudeMessages.length);
 
     if (claudeMessages.length > lastMessageCount) {
+      console.log('[CS claude] NEW MESSAGE DETECTED! Previous:', lastMessageCount, 'Current:', claudeMessages.length);
+
       // Check if generation is complete (no stop button visible and not streaming)
       const stopButton = findElement(SELECTORS.stopButton);
       if (stopButton && stopButton.offsetParent !== null) {
-        // Still generating, wait
+        console.log('[CS claude] Stop button still visible - still generating, will wait');
         return;
       }
+
+      // Get the last message
+      const lastMessage = claudeMessages[claudeMessages.length - 1];
 
       // Check for streaming attribute
-      const lastMessage = claudeMessages[claudeMessages.length - 1];
       const isStreaming = lastMessage.getAttribute('data-is-streaming');
+      console.log('[CS claude] Last message data-is-streaming:', isStreaming);
+
       if (isStreaming === 'true') {
-        // Still streaming, wait
+        console.log('[CS claude] Still streaming - will wait');
         return;
       }
 
-      // Get the last message text
+      // Extract the message text
       const text = extractMessageText(lastMessage);
 
       if (text && text.length > 0) {
+        console.log('[CS claude] ✓ Complete message ready, length:', text.length);
+        console.log('[CS claude] Message preview:', text.slice(0, 200));
+
         lastMessageCount = claudeMessages.length;
 
         // Send to background
         if (port) {
-          port.postMessage({
+          const message = {
             type: 'NEW_MESSAGE',
             platform: 'claude',
             content: text,
             sessionId: currentSessionId
-          });
+          };
+
+          console.log('[CS claude] Sending NEW_MESSAGE to background for session:', currentSessionId);
+          port.postMessage(message);
+          console.log('[CS claude] ✓ NEW_MESSAGE sent successfully');
+        } else {
+          console.error('[CS claude] ✗ Cannot send message - port is null!');
         }
+      } else {
+        console.warn('[CS claude] Message text is empty, skipping');
       }
+    } else {
+      console.log('[CS claude] No new messages detected');
     }
   }
 
@@ -189,18 +217,26 @@
   // ============================================================================
 
   function sendPrompt(text, sessionId) {
+    console.log('[CS claude] sendPrompt called with sessionId:', sessionId);
+    console.log('[CS claude] Prompt text length:', text.length);
+    console.log('[CS claude] Prompt preview:', text.slice(0, 100) + '...');
+
     return new Promise((resolve, reject) => {
       try {
         isProcessing = true;
         currentSessionId = sessionId;
+        console.log('[CS claude] Set currentSessionId to:', currentSessionId);
 
         // Find input area
         const input = findElement(SELECTORS.inputArea);
         if (!input) {
+          console.error('[CS claude] ✗ Could not find input area!');
           reject(new Error('Could not find input area'));
           isProcessing = false;
           return;
         }
+
+        console.log('[CS claude] ✓ Found input element:', input.tagName);
 
         // Set the text
         if (input.tagName === 'TEXTAREA') {
@@ -238,6 +274,8 @@
           // Find and click submit button
           const submitBtn = findElement(SELECTORS.submitButton);
           if (!submitBtn) {
+            console.log('[CS claude] Submit button not found, using Enter key fallback');
+
             // Fallback: try Enter key
             const enterEvent = new KeyboardEvent('keydown', {
               key: 'Enter',
@@ -256,12 +294,13 @@
               bubbles: true
             }));
           } else {
-            // Click the submit button
+            console.log('[CS claude] ✓ Found submit button, clicking...');
             submitBtn.click();
           }
 
           // Reset processing flag after a delay
           setTimeout(() => {
+            console.log('[CS claude] Prompt sent, resetting isProcessing flag');
             isProcessing = false;
             resolve();
           }, 2000);
@@ -305,16 +344,23 @@
 
   // Listen for commands from background
   port.onMessage.addListener((msg) => {
-    console.log('[CS claude] Received message from background:', msg.type);
+    console.log('[CS claude] ← Received message from background:', msg);
+
     if (msg.type === 'SEND_PROMPT') {
+      console.log('[CS claude] SEND_PROMPT command received');
+      console.log('[CS claude] SessionId:', msg.sessionId);
+      console.log('[CS claude] Text preview:', (msg.text || '').slice(0, 100));
+
       sendPrompt(msg.text, msg.sessionId).catch(err => {
-        console.error('[CS claude] Failed to send prompt:', err);
+        console.error('[CS claude] ✗ Failed to send prompt:', err);
       });
+    } else {
+      console.log('[CS claude] Unknown message type:', msg.type);
     }
   });
 
   port.onDisconnect.addListener(() => {
-    console.warn('[CS claude] Port disconnected from background');
+    console.error('[CS claude] ✗ Port disconnected from background');
   });
 
   // ============================================================================
@@ -322,13 +368,17 @@
   // ============================================================================
 
   function initialize() {
-    console.log('[CS claude] Initializing DOM observers...');
+    console.log('[CS claude] ===== Initializing DOM observers =====');
+    console.log('[CS claude] Document ready state:', document.readyState);
 
     // Wait for page to be fully loaded
     if (document.readyState === 'loading') {
+      console.log('[CS claude] Document still loading, waiting for DOMContentLoaded...');
       document.addEventListener('DOMContentLoaded', initialize);
       return;
     }
+
+    console.log('[CS claude] Document ready, starting observer...');
 
     // Start observing for new messages
     startObserver();
@@ -337,11 +387,12 @@
     setTimeout(() => {
       const messages = getClaudeMessages();
       lastMessageCount = messages.length;
-      console.log('[CS claude] Initial message count:', lastMessageCount);
+      console.log('[CS claude] ===== Initial message count:', lastMessageCount, '=====');
     }, 1000);
   }
 
   // Start initialization
+  console.log('[CS claude] Calling initialize()...');
   initialize();
 
 })();
